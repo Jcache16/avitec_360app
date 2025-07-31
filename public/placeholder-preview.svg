@@ -1,0 +1,6 @@
+<svg width="300" height="200" viewBox="0 0 300 200" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="300" height="200" fill="#1a1a1a"/>
+  <circle cx="150" cy="100" r="40" fill="#4a5568"/>
+  <text x="150" y="105" text-anchor="middle" fill="#ffffff" font-family="Arial" font-size="12">Vista Previa</text>
+  <text x="150" y="160" text-anchor="middle" fill="#a0aec0" font-family="Arial" font-size="10">360° Video</text>
+</svg>
