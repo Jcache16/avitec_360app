@@ -98,7 +98,6 @@ export default function Home() {
           <CameraSetup
             onStartRecording={handleStartRecording}
             onBack={handleBackToStyleSelection}
-            styleConfig={styleConfig!}
           />
         );
       

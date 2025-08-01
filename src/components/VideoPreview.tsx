@@ -78,8 +78,9 @@ export default function VideoPreview({
       const url = URL.createObjectURL(processedBlob);
       setVideoUrl(url);
       setIsProcessing(false);
-    } catch (error: any) {
-      setError(error.message || "Error procesando el video");
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : "Error procesando el video";
+      setError(errorMessage);
       setIsProcessing(false);
     }
   };
@@ -102,7 +103,8 @@ export default function VideoPreview({
     try {
       await new Promise(resolve => setTimeout(resolve, 3000));
       alert('¡Video subido exitosamente a Google Drive!');
-    } catch (error) {
+    } catch (uploadError) {
+      console.error('Error subiendo a Google Drive:', uploadError);
       alert('Error subiendo a Google Drive');
     } finally {
       setIsUploading(false);

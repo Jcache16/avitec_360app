@@ -63,7 +63,7 @@ export default function StyleSelection({ onContinue, onBack }: StyleSelectionPro
   const [customFrameColor, setCustomFrameColor] = useState<string>("#8B5CF6"); // Purple por defecto
   const [customText, setCustomText] = useState<string>("¡Mi momento 360°!");
   const [selectedFont, setSelectedFont] = useState<string>("montserrat");
-  const [selectedTextColor, setSelectedTextColor] = useState<string>("white");
+  const selectedTextColor = "white"; // Color fijo para el texto
   const [isPlayingPreview, setIsPlayingPreview] = useState<string | null>(null);
   const [currentAudio, setCurrentAudio] = useState<HTMLAudioElement | null>(null);
   

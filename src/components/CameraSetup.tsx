@@ -8,15 +8,13 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { StyleConfig } from "@/utils/VideoProcessor";
 
 interface CameraSetupProps {
   onStartRecording: (duration: number) => void;
   onBack: () => void;
-  styleConfig: StyleConfig;
 }
 
-export default function CameraSetup({ onStartRecording, onBack, styleConfig }: CameraSetupProps) {
+export default function CameraSetup({ onStartRecording, onBack }: CameraSetupProps) {
   const [hasPermission, setHasPermission] = useState<boolean | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);

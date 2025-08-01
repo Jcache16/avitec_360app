@@ -137,7 +137,9 @@ class VideoProcessor {
         "📁 Archivos en FS al ocurrir el error:",
         files.map((f) => f.name)
       );
-    } catch (e) {}
+    } catch {
+      // Error al listar archivos, continuar con cleanup
+    }
     await this.cleanup();
     throw error;
   }
@@ -303,7 +305,8 @@ class VideoProcessor {
         outputFile,
       ]);
       await this.verifyFileExists(outputFile);
-    } catch (error) {
+    } catch {
+      // Si falla la combinación con audio, crear sin audio
       await this.ffmpeg.exec([
         "-i",
         inputFile,
@@ -331,7 +334,9 @@ class VideoProcessor {
       for (const file of files) {
         if (!file.isDir) await this.ffmpeg.deleteFile(file.name);
       }
-    } catch (e) {}
+    } catch {
+      // Error durante cleanup, continuar
+    }
   }
 }
 
