@@ -13,7 +13,8 @@ import { StyleConfig, processVideo360, ProcessingProgress } from "@/utils/VideoP
 interface VideoPreviewProps {
   videoBlob: Blob;
   styleConfig: StyleConfig;
-  duration: number;
+  normalDuration: number;
+  slowmoDuration: number;
   overlayPNG: Blob;
   onRestart: () => void;
   onBack: () => void;
@@ -22,7 +23,8 @@ interface VideoPreviewProps {
 export default function VideoPreview({
   videoBlob,
   styleConfig,
-  duration,
+  normalDuration,
+  slowmoDuration,
   overlayPNG,
   onRestart,
   onBack,
@@ -32,10 +34,31 @@ export default function VideoPreview({
   const [processingProgress, setProcessingProgress] = useState(0);
   const [processingStep, setProcessingStep] = useState("Iniciando...");
   const [error, setError] = useState<string | null>(null);
-  const [isUploading, setIsUploading] = useState(false); // <--- add this line
+  const [isUploading, setIsUploading] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const isProcessingRef = useRef(false);
+  const hasProcessedRef = useRef(false);
 
   useEffect(() => {
+    // Prevenir ejecución doble en React Strict Mode
+    if (isProcessingRef.current) {
+      console.log('⚠️ Procesamiento ya en curso, omitiendo...');
+      return;
+    }
+    
+    // Prevenir reprocesamiento innecesario
+    if (hasProcessedRef.current) {
+      console.log('⚠️ Ya se procesó anteriormente, omitiendo...');
+      return;
+    }
+
+    // Solo procesar si tenemos ambos blobs
+    if (!videoBlob || !overlayPNG) {
+      console.log('⚠️ Faltan datos para procesar:', { videoBlob: !!videoBlob, overlayPNG: !!overlayPNG });
+      return;
+    }
+    
+    console.log('🎯 Iniciando procesamiento único en useEffect');
     processVideo();
     return () => {
       if (videoUrl) URL.revokeObjectURL(videoUrl);
@@ -44,6 +67,11 @@ export default function VideoPreview({
   }, [videoBlob, overlayPNG]);
 
   const processVideo = async () => {
+    if (isProcessingRef.current) {
+      console.log('⚠️ Ya hay un procesamiento en curso');
+      return;
+    }
+    
     console.log('🎬 Iniciando procesamiento de video en VideoPreview');
     console.log('📊 Parámetros recibidos:', {
       videoBlob: {
@@ -54,10 +82,13 @@ export default function VideoPreview({
         size: overlayPNG.size,
         type: overlayPNG.type
       },
-      duration,
+      normalDuration,
+      slowmoDuration,
+      totalDuration: normalDuration + slowmoDuration,
       styleConfig
     });
     
+    isProcessingRef.current = true; // Marcar como en procesamiento
     setIsProcessing(true);
     setError(null);
     setProcessingProgress(0);
@@ -71,17 +102,23 @@ export default function VideoPreview({
       const processedBlob = await processVideo360(
         videoBlob,
         styleConfig,
-        duration,
+        normalDuration,
+        slowmoDuration,
         overlayPNG,
         onProgress
       );
       const url = URL.createObjectURL(processedBlob);
       setVideoUrl(url);
       setIsProcessing(false);
+      hasProcessedRef.current = true; // Marcar como procesado exitosamente
+      console.log('✅ Procesamiento completado exitosamente');
     } catch (error: unknown) {
+      console.error('❌ Error procesando video:', error);
       const errorMessage = error instanceof Error ? error.message : "Error procesando el video";
       setError(errorMessage);
       setIsProcessing(false);
+    } finally {
+      isProcessingRef.current = false; // Liberar la bandera
     }
   };
 
@@ -224,7 +261,7 @@ export default function VideoPreview({
             {/* Info del video */}
             <div className="mt-4 text-center">
               <p className="text-white/70 text-sm mb-2">
-                Duración: {duration}s • Formato: 9:16 • Calidad: 720p
+                Duración: {normalDuration + slowmoDuration}s • Formato: 9:16 • Calidad: 720p
               </p>
               <div className="flex items-center justify-center gap-2 text-white/50 text-xs">
                 {styleConfig.music && styleConfig.music !== 'none' && (

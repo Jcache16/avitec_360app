@@ -11,16 +11,12 @@ import { useState, useEffect, useRef } from "react";
 import { StyleConfig } from "@/utils/VideoProcessor";
 
 interface RecordingScreenProps {
-  onRecordingComplete: (videoBlob: Blob, config: RecordingConfig) => void;
+  onRecordingComplete: (videoBlob: Blob) => void;
   onBack: () => void;
   styleConfig: StyleConfig;
-  duration: number;
-}
-
-interface RecordingConfig {
-  duration: number;
-  styleConfig: StyleConfig;
-  videoBlob: Blob;
+  normalDuration: number;
+  slowmoDuration: number;
+  facingMode: string;
 }
 
 enum RecordingState {
@@ -30,7 +26,14 @@ enum RecordingState {
   PROCESSING = "processing"
 }
 
-export default function RecordingScreen({ onRecordingComplete, onBack, styleConfig, duration }: RecordingScreenProps) {
+export default function RecordingScreen({ 
+  onRecordingComplete, 
+  onBack, 
+  styleConfig, 
+  normalDuration, 
+  slowmoDuration, 
+  facingMode 
+}: RecordingScreenProps) {
   const [recordingState, setRecordingState] = useState<RecordingState>(RecordingState.READY);
   const [countdownNumber, setCountdownNumber] = useState(3);
   const [recordingProgress, setRecordingProgress] = useState(0);
@@ -42,33 +45,71 @@ export default function RecordingScreen({ onRecordingComplete, onBack, styleConf
   const recordedChunks = useRef<Blob[]>([]);
   const countdownAudioRef = useRef<HTMLAudioElement | null>(null);
   const startAudioRef = useRef<HTMLAudioElement | null>(null);
+  
+  const totalDuration = normalDuration + slowmoDuration;
 
   // Configurar cámara al montar
   useEffect(() => {
-    setupCamera();
+    // Dar un poco de tiempo para que se libere la cámara anterior
+    const timer = setTimeout(() => {
+      setupCamera();
+    }, 200);
+    
     return () => {
+      clearTimeout(timer);
       cleanup();
     };
-  }, []);
+  }, [facingMode]); // También re-configurar si cambia la cámara
 
   const setupCamera = async () => {
     try {
+      console.log('🎥 Configurando cámara en RecordingScreen con facingMode:', facingMode);
+      
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
-          width: { ideal: 720 },  // 9:16 aspect ratio
-          height: { ideal: 1280 },
-          facingMode: "user"
+          width: { ideal: 1920 },  // Mantener misma resolución que CameraSetup
+          height: { ideal: 1080 },
+          facingMode: facingMode // Usar la cámara seleccionada en CameraSetup
         },
-        audio: false // SIN AUDIO para mejor rendimiento
+        audio: true // Mantener audio como en CameraSetup para consistencia
       });
 
       streamRef.current = stream;
+      console.log('✅ Stream obtenido exitosamente');
       
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
+        // Asegurarse de que el video se reproduzca
+        videoRef.current.muted = true; // Evitar eco de audio
+        try {
+          await videoRef.current.play();
+          console.log('✅ Video reproduciéndose');
+        } catch (playError) {
+          console.warn('⚠️ Error al reproducir video:', playError);
+          // Intentar reproducir sin audio
+          videoRef.current.muted = true;
+          await videoRef.current.play();
+        }
       }
     } catch (err) {
-      console.error("Error accessing camera:", err);
+      console.error("❌ Error accessing camera in RecordingScreen:", err);
+      // Intentar de nuevo con configuración más básica
+      try {
+        console.log('🔄 Intentando configuración básica de cámara...');
+        const basicStream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: facingMode },
+          audio: false
+        });
+        
+        streamRef.current = basicStream;
+        if (videoRef.current) {
+          videoRef.current.srcObject = basicStream;
+          videoRef.current.muted = true;
+          await videoRef.current.play();
+        }
+      } catch (basicErr) {
+        console.error("❌ Error con configuración básica:", basicErr);
+      }
     }
   };
 
@@ -152,19 +193,15 @@ export default function RecordingScreen({ onRecordingComplete, onBack, styleConf
       // Progreso de grabación - GRABAR TODA LA DURACIÓN
       const progressInterval = setInterval(() => {
         setRecordingProgress(prev => {
-          const newProgress = prev + (100 / (duration * 10)); // Incrementos más precisos cada 100ms
+          const newProgress = prev + (100 / (totalDuration * 10)); // Incrementos más precisos cada 100ms
           
           // Mostrar fase que se aplicará en post-producción
-          const currentTime = (newProgress / 100) * duration;
-          const normalDuration = duration * 0.6;
-          const slowmoDuration = duration * 0.2;
+          const currentTime = (newProgress / 100) * totalDuration;
           
           if (currentTime <= normalDuration) {
             setCurrentPhase("Grabando - Normal");
-          } else if (currentTime <= normalDuration + slowmoDuration) {
-            setCurrentPhase("Grabando - Slow Motion");
           } else {
-            setCurrentPhase("Grabando - Boomerang");
+            setCurrentPhase("Grabando - Slow Motion");
           }
 
           if (newProgress >= 100) {
@@ -183,7 +220,7 @@ export default function RecordingScreen({ onRecordingComplete, onBack, styleConf
           mediaRecorder.stop();
         }
         clearInterval(progressInterval);
-      }, duration * 1000); // Duración exacta en milisegundos
+      }, totalDuration * 1000); // Duración exacta en milisegundos
 
     } catch (error) {
       console.error("Error starting recording:", error);
@@ -196,15 +233,8 @@ export default function RecordingScreen({ onRecordingComplete, onBack, styleConf
     // Simular procesamiento
     setTimeout(() => {
       const videoBlob = new Blob(recordedChunks.current, { type: 'video/webm' });
-      
-      const config: RecordingConfig = {
-        duration,
-        styleConfig,
-        videoBlob
-      };
-      
-      onRecordingComplete(videoBlob, config);
-    }, 3000); // 3 segundos de "procesamiento"
+      onRecordingComplete(videoBlob);
+    }, 2000); // 2 segundos de procesamiento simplificado
   };
 
   const getPhaseColor = (phase: string) => {
@@ -224,7 +254,7 @@ export default function RecordingScreen({ onRecordingComplete, onBack, styleConf
         autoPlay
         playsInline
         muted
-        className="absolute inset-0 w-full h-full object-cover"
+        className="absolute inset-0 w-full h-full object-contain md:object-cover"
       />
 
       {/* Overlay oscuro para legibilidad */}
@@ -251,7 +281,7 @@ export default function RecordingScreen({ onRecordingComplete, onBack, styleConf
           )}
 
           <div className="bg-black/50 backdrop-blur-sm px-4 py-2 rounded-full">
-            <span className="text-white font-medium">{duration}s</span>
+            <span className="text-white font-medium">{totalDuration}s</span>
           </div>
         </div>
 
@@ -288,7 +318,7 @@ export default function RecordingScreen({ onRecordingComplete, onBack, styleConf
               <div className="flex items-center justify-between mb-2">
                 <span className="text-white/80 text-sm">Grabando</span>
                 <span className="text-white font-medium">
-                  {Math.round((recordingProgress / 100) * duration)}s / {duration}s
+                  {Math.round((recordingProgress / 100) * totalDuration)}s / {totalDuration}s
                 </span>
               </div>
               <div className="w-full bg-white/20 rounded-full h-2">

@@ -29,7 +29,9 @@ export default function Home() {
   const [currentScreen, setCurrentScreen] = useState<AppScreen>(AppScreen.WELCOME);
   const [styleConfig, setStyleConfig] = useState<StyleConfig | null>(null);
   const [overlayPNG, setOverlayPNG] = useState<Blob | null>(null);
-  const [recordingDuration, setRecordingDuration] = useState<number>(15);
+  const [normalDuration, setNormalDuration] = useState<number>(8);
+  const [slowmoDuration, setSlowmoDuration] = useState<number>(7);
+  const [selectedFacingMode, setSelectedFacingMode] = useState<string>("user");
   const [videoBlob, setVideoBlob] = useState<Blob | null>(null);
 
   const handleStyleConfigured = (config: StyleConfig, overlayPNG: Blob) => {
@@ -59,15 +61,19 @@ export default function Home() {
   };
 
 
-  const handleStartRecording = (duration: number) => {
-    setRecordingDuration(duration);
+  const handleStartRecording = (normalDur: number, slowmoDur: number, facingMode: string) => {
+    setNormalDuration(normalDur);
+    setSlowmoDuration(slowmoDur);
+    setSelectedFacingMode(facingMode);
     navigateToScreen(AppScreen.RECORDING);
   };
 
   const handleRestartExperience = () => {
     setStyleConfig(null);
     setVideoBlob(null);
-    setRecordingDuration(15);
+    setNormalDuration(8);
+    setSlowmoDuration(7);
+    setSelectedFacingMode("user");
     navigateToScreen(AppScreen.WELCOME);
   };
 
@@ -107,7 +113,9 @@ export default function Home() {
             onRecordingComplete={handleRecordingComplete}
             onBack={handleBackToStyleSelection}
             styleConfig={styleConfig!}
-            duration={recordingDuration}
+            normalDuration={normalDuration}
+            slowmoDuration={slowmoDuration}
+            facingMode={selectedFacingMode}
           />
         );
       
@@ -116,7 +124,8 @@ export default function Home() {
           <VideoPreview
             videoBlob={videoBlob!}
             styleConfig={styleConfig!}
-            duration={recordingDuration}
+            normalDuration={normalDuration}
+            slowmoDuration={slowmoDuration}
             overlayPNG={overlayPNG!}
             onRestart={handleRestartExperience}
             onBack={() => setCurrentScreen(AppScreen.CAMERA_SETUP)}

@@ -10,7 +10,7 @@
 import { useState, useEffect, useRef } from "react";
 
 interface CameraSetupProps {
-  onStartRecording: (duration: number) => void;
+  onStartRecording: (normalDuration: number, slowmoDuration: number, facingMode: string) => void;
   onBack: () => void;
 }
 
@@ -18,12 +18,14 @@ export default function CameraSetup({ onStartRecording, onBack }: CameraSetupPro
   const [hasPermission, setHasPermission] = useState<boolean | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [recordingDuration, setRecordingDuration] = useState(15); // Duración en segundos
+  const [normalDuration, setNormalDuration] = useState(8); // Duración video normal
+  const [slowmoDuration, setSlowmoDuration] = useState(7); // Duración slowmo
+  const [currentFacingMode, setCurrentFacingMode] = useState<string>("user"); // Cámara seleccionada
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
   // Solicitar permisos y configurar cámara
-  const requestCameraAccess = async () => {
+  const requestCameraAccess = async (facingMode: string = "user") => {
     setIsLoading(true);
     setError(null);
 
@@ -32,12 +34,13 @@ export default function CameraSetup({ onStartRecording, onBack }: CameraSetupPro
         video: {
           width: { ideal: 1920 },
           height: { ideal: 1080 },
-          facingMode: "user" // Cámara frontal por defecto
+          facingMode: facingMode
         },
         audio: true
       });
 
       streamRef.current = stream;
+      setCurrentFacingMode(facingMode);
       
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
@@ -61,27 +64,12 @@ export default function CameraSetup({ onStartRecording, onBack }: CameraSetupPro
     streamRef.current.getTracks().forEach(track => track.stop());
 
     try {
-      const currentFacingMode = streamRef.current.getVideoTracks()[0].getSettings().facingMode;
       const newFacingMode = currentFacingMode === "user" ? "environment" : "user";
-
-      const newStream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          width: { ideal: 1920 },
-          height: { ideal: 1080 },
-          facingMode: newFacingMode
-        },
-        audio: true
-      });
-
-      streamRef.current = newStream;
-      
-      if (videoRef.current) {
-        videoRef.current.srcObject = newStream;
-      }
+      await requestCameraAccess(newFacingMode);
     } catch (err) {
       console.error("Error switching camera:", err);
       // Si falla, intentar volver a la cámara original
-      requestCameraAccess();
+      await requestCameraAccess(currentFacingMode);
     }
   };
 
@@ -96,7 +84,14 @@ export default function CameraSetup({ onStartRecording, onBack }: CameraSetupPro
 
   const handleStartRecording = () => {
     if (hasPermission && streamRef.current) {
-      onStartRecording(recordingDuration);
+      // Cerrar el stream actual para evitar conflictos con RecordingScreen
+      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
+      
+      // Dar un poco de tiempo antes de navegar
+      setTimeout(() => {
+        onStartRecording(normalDuration, slowmoDuration, currentFacingMode);
+      }, 100);
     }
   };
 
@@ -147,7 +142,7 @@ export default function CameraSetup({ onStartRecording, onBack }: CameraSetupPro
                   </p>
                 )}
                 <button
-                  onClick={requestCameraAccess}
+                  onClick={() => requestCameraAccess()}
                   disabled={isLoading}
                   className="bg-white/20 backdrop-blur-sm text-white px-6 py-3 rounded-xl font-medium hover:bg-white/30 transition-colors disabled:opacity-50"
                 >
@@ -186,24 +181,54 @@ export default function CameraSetup({ onStartRecording, onBack }: CameraSetupPro
           {/* Configuraciones */}
           {hasPermission && (
             <div className="space-y-4">
-              {/* Duración de grabación */}
+              {/* Duración video normal */}
               <div className="bg-white/10 backdrop-blur-sm rounded-xl p-4">
                 <label className="block text-white font-medium mb-3">
-                  Duración de grabación: {recordingDuration}s
+                  Video normal: {normalDuration}s
                 </label>
                 <input
                   type="range"
-                  min="10"
-                  max="20"
-                  step="5"
-                  value={recordingDuration}
-                  onChange={(e) => setRecordingDuration(Number(e.target.value))}
+                  min="3"
+                  max="10"
+                  step="1"
+                  value={normalDuration}
+                  onChange={(e) => setNormalDuration(Number(e.target.value))}
                   className="w-full h-2 bg-white/20 rounded-lg appearance-none cursor-pointer slider"
                 />
                 <div className="flex justify-between text-white/60 text-xs mt-1">
+                  <span>3s</span>
+                  <span>5s</span>
+                  <span>8s</span>
                   <span>10s</span>
-                  <span>15s</span>
-                  <span>20s</span>
+                </div>
+              </div>
+
+              {/* Duración slowmo */}
+              <div className="bg-white/10 backdrop-blur-sm rounded-xl p-4">
+                <label className="block text-white font-medium mb-3">
+                  Slowmo: {slowmoDuration}s
+                </label>
+                <input
+                  type="range"
+                  min="2"
+                  max={15 - normalDuration}
+                  step="1"
+                  value={slowmoDuration}
+                  onChange={(e) => setSlowmoDuration(Number(e.target.value))}
+                  className="w-full h-2 bg-white/20 rounded-lg appearance-none cursor-pointer slider"
+                />
+                <div className="flex justify-between text-white/60 text-xs mt-1">
+                  <span>2s</span>
+                  <span>{Math.floor((15 - normalDuration) / 2)}s</span>
+                  <span>{15 - normalDuration}s</span>
+                </div>
+              </div>
+
+              {/* Total duration display */}
+              <div className="bg-gradient-to-r from-purple-500/20 to-pink-500/20 backdrop-blur-sm rounded-xl p-4 border border-white/20">
+                <div className="text-center">
+                  <span className="text-white font-medium">Total: {normalDuration + slowmoDuration}s</span>
+                  <span className="text-white/60 text-sm block">de máximo 15s</span>
                 </div>
               </div>
 
@@ -213,7 +238,7 @@ export default function CameraSetup({ onStartRecording, onBack }: CameraSetupPro
                 <ul className="text-white/80 text-sm space-y-1">
                   <li>• Mantén el dispositivo estable</li>
                   <li>• Asegúrate de tener buena iluminación</li>
-                  <li>• La grabación será automática</li>
+                  <li>• Sin boomerang para mejor rendimiento</li>
                 </ul>
               </div>
             </div>

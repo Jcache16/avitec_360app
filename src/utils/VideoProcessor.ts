@@ -25,6 +25,7 @@ export interface StyleConfig {
 class VideoProcessor {
   private ffmpeg: FFmpeg;
   private isLoaded: boolean = false;
+  private loadingPromise: Promise<void> | null = null;
 
   constructor() {
     this.ffmpeg = new FFmpeg();
@@ -33,14 +34,43 @@ class VideoProcessor {
   private async load(
     onProgress?: (progress: ProcessingProgress) => void
   ): Promise<void> {
-    if (this.isLoaded) return;
+    // Si ya está cargado, no hacer nada
+    if (this.isLoaded) {
+      console.log('✅ FFmpeg ya está cargado');
+      return;
+    }
+    
+    // Si ya hay una carga en progreso, esperar a que termine
+    if (this.loadingPromise) {
+      console.log('⏳ Esperando a que termine la carga en progreso...');
+      return this.loadingPromise;
+    }
+    
+    // Crear nueva promesa de carga
+    console.log('🚀 Iniciando carga de FFmpeg...');
+    this.loadingPromise = this.performLoad(onProgress);
+    
+    try {
+      await this.loadingPromise;
+    } finally {
+      // Limpiar la promesa una vez completada
+      this.loadingPromise = null;
+    }
+  }
+
+  private async performLoad(
+    onProgress?: (progress: ProcessingProgress) => void
+  ): Promise<void> {
     onProgress?.({ step: "Cargando FFmpeg...", progress: 0, total: 100 });
+    
     const baseURL = "https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd";
+    
     this.ffmpeg.on("log", ({ message }) => {
       if (message.includes("time=") || /error|failed|unable/i.test(message)) {
         console.log("🎬 FFmpeg:", message);
       }
     });
+    
     this.ffmpeg.on("progress", ({ progress }) => {
       if (progress > 0 && onProgress) {
         onProgress({
@@ -50,34 +80,120 @@ class VideoProcessor {
         });
       }
     });
-    await this.ffmpeg.load({
-      coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, "text/javascript"),
-      wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, "application/wasm"),
-    });
-    this.isLoaded = true;
-    onProgress?.({ step: "FFmpeg cargado", progress: 5, total: 100 });
+    
+    try {
+      await this.ffmpeg.load({
+        coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, "text/javascript"),
+        wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, "application/wasm"),
+      });
+      
+      console.log('🔧 FFmpeg cargado, verificando disponibilidad del FS...');
+      
+      // Esperar un poco y verificar que el FS esté disponible
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      // Probar el FS escribiendo un archivo de prueba
+      console.log('🧪 Probando FS de FFmpeg...');
+      const testData = new Uint8Array([1, 2, 3, 4, 5]);
+      
+      try {
+        await this.ffmpeg.writeFile("test.txt", testData);
+        console.log('✅ Archivo de prueba escrito');
+        
+        const readData = await this.ffmpeg.readFile("test.txt");
+        console.log('✅ Archivo de prueba leído, tamaño:', readData.length);
+        
+        await this.ffmpeg.deleteFile("test.txt");
+        console.log('✅ Archivo de prueba eliminado');
+        
+        // Verificar que los datos sean correctos
+        console.log('🔍 Tipo de datos leídos:', typeof readData, readData);
+        
+        // Simplificar la verificación - solo verificar que se pudo leer algo
+        if (!readData || (readData instanceof Uint8Array && readData.length === 0)) {
+          throw new Error('No se pudieron leer datos del archivo de prueba');
+        }
+        
+        console.log('✅ Verificación básica de FS exitosa');
+        
+        console.log('✅ Test de FS completado exitosamente');
+      } catch (testError) {
+        console.error('❌ Error en test de FS:', testError);
+        throw new Error(`Test de FS falló: ${testError instanceof Error ? testError.message : String(testError)}`);
+      }
+      
+      this.isLoaded = true;
+      console.log('✅ FFmpeg completamente cargado y FS verificado');
+      onProgress?.({ step: "FFmpeg cargado", progress: 5, total: 100 });
+    } catch (error) {
+      console.error('❌ Error cargando FFmpeg:', error);
+      this.isLoaded = false;
+      throw new Error(`No se pudo cargar FFmpeg: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 
   async processWithStyles(
   videoBlob: Blob,
-  duration: number,
+  normalDuration: number,
+  slowmoDuration: number,
   styles: StyleConfig,
   overlayPNG: Blob,
   onProgress?: (progress: ProcessingProgress) => void
 ): Promise<Blob> {
+  console.log('🎬 Iniciando procesamiento de video con estilos...');
+  console.log('📋 Parámetros:', {
+    normalDuration,
+    slowmoDuration,
+    totalDuration: normalDuration + slowmoDuration,
+    videoBlobSize: videoBlob.size,
+    overlayBlobSize: overlayPNG.size,
+    stylesKeys: Object.keys(styles)
+  });
+  
   try {
     await this.load(onProgress);
     onProgress?.({ step: "Preparando archivos...", progress: 10, total: 100 });
 
-    // Limpieza previa
+    // Verificar estado inicial de FFmpeg
+    console.log('🔧 Estado inicial de FFmpeg...');
+    try {
+      const initialFiles = await this.ffmpeg.listDir(".");
+      console.log('📁 Archivos iniciales en FS:', initialFiles.map(f => f.name));
+    } catch (fsError) {
+      console.error('❌ Error listando FS inicial:', fsError);
+      throw new Error('FFmpeg FS no está disponible. Reinicia la aplicación.');
+    }
+
+    // Limpieza previa más selectiva
     await this.cleanup();
 
-    // Escribe el archivo del video de entrada
-    await this.ffmpeg.writeFile("input.webm", await fetchFile(videoBlob));
-    await this.verifyFileExists("input.webm");
+    // Escribe el archivo del video de entrada con validación robusta
+    console.log('📤 Escribiendo video de entrada...');
+    try {
+      const videoData = await fetchFile(videoBlob);
+      console.log('📊 Video datos:', {
+        blobSize: videoBlob.size,
+        blobType: videoBlob.type,
+        arraySize: videoData.length
+      });
+      
+      if (videoData.length === 0) {
+        throw new Error('Los datos del video están vacíos');
+      }
+      
+      await this.ffmpeg.writeFile("input.webm", videoData);
+      
+      // Verificación inmediata
+      await this.verifyFileExists("input.webm");
+      console.log('✅ Video de entrada escrito exitosamente');
+    } catch (videoError) {
+      console.error('❌ Error escribiendo video:', videoError);
+      throw new Error(`No se pudo escribir el video de entrada: ${videoError instanceof Error ? videoError.message : String(videoError)}`);
+    }
 
-    // Validación y escritura del overlay PNG
-    console.log('🔍 Validando overlay PNG recibido:', {
+    // Validación y escritura del overlay PNG con validación robusta
+    console.log('�️ Procesando overlay PNG...');
+    console.log('�🔍 Validando overlay PNG recibido:', {
       exists: !!overlayPNG,
       size: overlayPNG?.size,
       type: overlayPNG?.type,
@@ -100,15 +216,32 @@ class VideoProcessor {
       throw new Error("El overlay PNG tiene tamaño 0.");
     }
     
-    console.log('✅ Overlay PNG válido, escribiendo a FFmpeg FS...');
-    const overlayData = await fetchFile(overlayPNG);
-    console.log('📤 Datos del overlay extraídos:', overlayData.length, 'bytes');
-    
-    await this.ffmpeg.writeFile("overlay.png", overlayData);
-    await this.verifyFileExists("overlay.png");
+    console.log('✅ Overlay PNG válido, extrayendo datos...');
+    try {
+      const overlayData = await fetchFile(overlayPNG);
+      console.log('📤 Datos del overlay extraídos:', {
+        blobSize: overlayPNG.size,
+        arraySize: overlayData.length,
+        firstBytes: Array.from(overlayData.slice(0, 8)).map(b => b.toString(16)).join(' ')
+      });
+      
+      if (overlayData.length === 0) {
+        throw new Error('Los datos del overlay están vacíos después de fetchFile');
+      }
+      
+      console.log('📝 Escribiendo overlay a FFmpeg FS...');
+      await this.ffmpeg.writeFile("overlay.png", overlayData);
+      
+      // Verificación inmediata
+      await this.verifyFileExists("overlay.png");
+      console.log('✅ Overlay PNG escrito exitosamente');
+    } catch (overlayError) {
+      console.error('❌ Error procesando overlay:', overlayError);
+      throw new Error(`No se pudo procesar el overlay PNG: ${overlayError instanceof Error ? overlayError.message : String(overlayError)}`);
+    }
 
     onProgress?.({ step: "Efectos de velocidad...", progress: 20, total: 100 });
-    await this.createSpeedEffectSegments(duration);
+    await this.createSpeedEffectSegments(normalDuration, slowmoDuration);
 
     onProgress?.({ step: "Uniendo y normalizando...", progress: 50, total: 100 });
     await this.concatenateAndNormalizeSegments();
@@ -131,6 +264,14 @@ class VideoProcessor {
     return outputBlob;
   } catch (error) {
     console.error("❌ Error fatal en el procesamiento de video:", error);
+    console.log("🔍 Información de debug del error:", {
+      errorName: error instanceof Error ? error.name : 'Unknown',
+      errorMessage: error instanceof Error ? error.message : String(error),
+      errorStack: error instanceof Error ? error.stack : 'No stack',
+      isLoaded: this.isLoaded
+    });
+    
+    // Diagnóstico detallado del estado actual
     try {
       const files = await this.ffmpeg.listDir("/");
       console.log(
@@ -138,17 +279,21 @@ class VideoProcessor {
         files.map((f) => f.name)
       );
     } catch {
-      // Error al listar archivos, continuar con cleanup
+      console.error("❌ No se puede acceder al FS para diagnóstico");
     }
+    
+    // Limpiar y propagar el error con más contexto
     await this.cleanup();
-    throw error;
+    
+    if (error instanceof Error) {
+      throw new Error(`Procesamiento de video falló: ${error.message}`);
+    } else {
+      throw new Error(`Procesamiento de video falló: ${String(error)}`);
+    }
   }
 }
 
-  private async createSpeedEffectSegments(duration: number): Promise<void> {
-    const normal = duration * 0.6,
-      slow = duration * 0.2,
-      reverse = duration * 0.2;
+  private async createSpeedEffectSegments(normalDuration: number, slowmoDuration: number): Promise<void> {
     const scaleArgs = ["-vf", "scale=720:1280,setsar=1"];
     const commonArgs = [
       "-c:v",
@@ -162,22 +307,25 @@ class VideoProcessor {
       "-y",
     ];
 
+    // Segmento 1: Video normal (normalDuration segundos)
     await this.ffmpeg.exec([
       "-i",
       "input.webm",
       "-t",
-      String(normal),
+      String(normalDuration),
       ...scaleArgs,
       ...commonArgs,
       "seg1.mp4",
     ]);
+    
+    // Segmento 2: Video en slow motion (slowmoDuration segundos)
     await this.ffmpeg.exec([
       "-i",
       "input.webm",
       "-ss",
-      String(normal),
+      String(normalDuration),
       "-t",
-      String(slow),
+      String(slowmoDuration),
       "-vf",
       "setpts=2.0*PTS,scale=720:1280,setsar=1",
       "-af",
@@ -185,34 +333,13 @@ class VideoProcessor {
       ...commonArgs,
       "seg2.mp4",
     ]);
-    await this.ffmpeg.exec([
-      "-i",
-      "input.webm",
-      "-ss",
-      String(normal + slow),
-      "-t",
-      String(reverse),
-      ...scaleArgs,
-      ...commonArgs,
-      "seg3_temp.mp4",
-    ]);
-    await this.ffmpeg.exec([
-      "-i",
-      "seg3_temp.mp4",
-      "-vf",
-      "reverse,scale=720:1280,setsar=1",
-      "-af",
-      "areverse",
-      ...commonArgs,
-      "seg3.mp4",
-    ]);
   }
 
   private async concatenateAndNormalizeSegments(): Promise<void> {
     await this.ffmpeg.writeFile(
       "concat_list.txt",
       new TextEncoder().encode(
-        "file seg1.mp4\nfile seg2.mp4\nfile seg3.mp4"
+        "file seg1.mp4\nfile seg2.mp4"
       )
     );
     await this.ffmpeg.exec([
@@ -319,44 +446,97 @@ class VideoProcessor {
   }
 
   private async verifyFileExists(filename: string): Promise<void> {
+    console.log(`🔍 Verificando existencia de archivo: ${filename}`);
     try {
+      // Primero listar todos los archivos para debug
+      const files = await this.ffmpeg.listDir(".");
+      console.log(`📁 Archivos disponibles en FS:`, files.map(f => f.name));
+      
       const data = await this.ffmpeg.readFile(filename);
-      if (data.length === 0)
+      console.log(`✅ Archivo ${filename} encontrado, tamaño: ${data.length} bytes`);
+      
+      if (data.length === 0) {
         throw new Error(`El archivo generado '${filename}' está vacío.`);
+      }
     } catch (error) {
-      throw error;
+      console.error(`❌ Error verificando archivo ${filename}:`, error);
+      
+      // Diagnóstico adicional
+      try {
+        const files = await this.ffmpeg.listDir(".");
+        console.log(`📁 Estado actual del FS:`, files.map(f => `${f.name} (${f.isDir ? 'dir' : 'file'})`));
+      } catch (listError) {
+        console.error(`❌ No se puede listar el FS:`, listError);
+      }
+      
+      throw new Error(`No se pudo verificar o leer el archivo '${filename}': ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
   private async cleanup(): Promise<void> {
+    console.log('🧹 Iniciando limpieza del FS...');
     try {
       const files = await this.ffmpeg.listDir(".");
-      for (const file of files) {
-        if (!file.isDir) await this.ffmpeg.deleteFile(file.name);
+      console.log('📁 Archivos antes de limpieza:', files.map(f => f.name));
+      
+      const filesToDelete = files.filter(f => !f.isDir && !['dev', 'proc', 'tmp'].includes(f.name));
+      console.log('🗑️ Archivos a eliminar:', filesToDelete.map(f => f.name));
+      
+      for (const file of filesToDelete) {
+        try {
+          await this.ffmpeg.deleteFile(file.name);
+          console.log(`✅ Eliminado: ${file.name}`);
+        } catch (deleteError) {
+          console.warn(`⚠️ No se pudo eliminar ${file.name}:`, deleteError);
+        }
       }
-    } catch {
-      // Error durante cleanup, continuar
+      
+      console.log('✅ Limpieza completada');
+    } catch (error) {
+      console.error('❌ Error durante cleanup:', error);
+      // No relanzar el error, continuar con el procesamiento
     }
   }
 }
 
 let processorInstance: VideoProcessor | null = null;
+let isProcessing = false;
 
 export const processVideo360 = async (
   videoBlob: Blob,
   styleConfig: StyleConfig,
-  duration: number,
+  normalDuration: number,
+  slowmoDuration: number,
   overlayPNG: Blob,
   onProgress?: (progress: ProcessingProgress) => void
 ): Promise<Blob> => {
-  if (!processorInstance) processorInstance = new VideoProcessor();
-  return await processorInstance.processWithStyles(
-    videoBlob,
-    duration,
-    styleConfig,
-    overlayPNG,
-    onProgress
-  );
+  if (isProcessing) {
+    throw new Error('Ya hay un procesamiento de video en curso. Espera a que termine.');
+  }
+  
+  console.log('🎯 Iniciando procesamiento único de video');
+  isProcessing = true;
+  
+  try {
+    if (!processorInstance) {
+      console.log('📦 Creando nueva instancia de VideoProcessor');
+      processorInstance = new VideoProcessor();
+    }
+    
+    const result = await processorInstance.processWithStyles(
+      videoBlob,
+      normalDuration,
+      slowmoDuration,
+      styleConfig,
+      overlayPNG,
+      onProgress
+    );
+    
+    console.log('✅ Procesamiento único completado');
+    return result;
+  } finally {
+    isProcessing = false;
+  }
 };
 
 export default VideoProcessor;
