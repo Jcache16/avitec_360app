@@ -28,9 +28,27 @@ enum AppScreen {
 export default function Home() {
   const [currentScreen, setCurrentScreen] = useState<AppScreen>(AppScreen.WELCOME);
   const [styleConfig, setStyleConfig] = useState<StyleConfig | null>(null);
+  const [overlayPNG, setOverlayPNG] = useState<Blob | null>(null);
   const [recordingDuration, setRecordingDuration] = useState<number>(15);
   const [videoBlob, setVideoBlob] = useState<Blob | null>(null);
 
+  const handleStyleConfigured = (config: StyleConfig, overlayPNG: Blob) => {
+    console.log('📋 handleStyleConfigured llamado con:', {
+      config,
+      overlayPNG: {
+        size: overlayPNG.size,
+        type: overlayPNG.type
+      }
+    });
+    setStyleConfig(config);
+    setOverlayPNG(overlayPNG);
+    setCurrentScreen(AppScreen.CAMERA_SETUP);
+  };
+
+  const handleRecordingComplete = (blob: Blob) => {
+    setVideoBlob(blob);
+    setCurrentScreen(AppScreen.PREVIEW);
+  };
   // Navegación entre pantallas
   const navigateToScreen = (screen: AppScreen) => {
     setCurrentScreen(screen);
@@ -40,19 +58,10 @@ export default function Home() {
     navigateToScreen(AppScreen.STYLE_SELECTION);
   };
 
-  const handleStyleConfigured = (config: StyleConfig) => {
-    setStyleConfig(config);
-    navigateToScreen(AppScreen.CAMERA_SETUP);
-  };
 
   const handleStartRecording = (duration: number) => {
     setRecordingDuration(duration);
     navigateToScreen(AppScreen.RECORDING);
-  };
-
-  const handleRecordingComplete = (blob: Blob, config: any) => {
-    setVideoBlob(blob);
-    navigateToScreen(AppScreen.PREVIEW); // Ir directamente a preview que maneja el procesamiento
   };
 
   const handleRestartExperience = () => {
@@ -109,8 +118,9 @@ export default function Home() {
             videoBlob={videoBlob!}
             styleConfig={styleConfig!}
             duration={recordingDuration}
+            overlayPNG={overlayPNG!}
             onRestart={handleRestartExperience}
-            onBack={() => navigateToScreen(AppScreen.CAMERA_SETUP)}
+            onBack={() => setCurrentScreen(AppScreen.CAMERA_SETUP)}
           />
         );
       

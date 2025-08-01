@@ -1,5 +1,5 @@
 /**
- * Componente: VideoPreview - Diseño mejorado
+ * Componente: VideoPreview - Diseño mejorado y robusto
  * 
  * Pantalla de vista previa del video final con estética consistente
  * Permite descargar o subir a Google Drive
@@ -14,53 +14,72 @@ interface VideoPreviewProps {
   videoBlob: Blob;
   styleConfig: StyleConfig;
   duration: number;
+  overlayPNG: Blob;
   onRestart: () => void;
   onBack: () => void;
 }
 
-export default function VideoPreview({ videoBlob, styleConfig, duration, onRestart, onBack }: VideoPreviewProps) {
+export default function VideoPreview({
+  videoBlob,
+  styleConfig,
+  duration,
+  overlayPNG,
+  onRestart,
+  onBack,
+}: VideoPreviewProps) {
   const [videoUrl, setVideoUrl] = useState<string>("");
   const [isProcessing, setIsProcessing] = useState(true);
   const [processingProgress, setProcessingProgress] = useState(0);
   const [processingStep, setProcessingStep] = useState("Iniciando...");
-  const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isUploading, setIsUploading] = useState(false); // <--- add this line
   const videoRef = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
     processVideo();
     return () => {
-      if (videoUrl) {
-        URL.revokeObjectURL(videoUrl);
-      }
+      if (videoUrl) URL.revokeObjectURL(videoUrl);
     };
-  }, [videoBlob]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [videoBlob, overlayPNG]);
 
   const processVideo = async () => {
+    console.log('🎬 Iniciando procesamiento de video en VideoPreview');
+    console.log('📊 Parámetros recibidos:', {
+      videoBlob: {
+        size: videoBlob.size,
+        type: videoBlob.type
+      },
+      overlayPNG: {
+        size: overlayPNG.size,
+        type: overlayPNG.type
+      },
+      duration,
+      styleConfig
+    });
+    
     setIsProcessing(true);
     setError(null);
     setProcessingProgress(0);
-    
     try {
       const onProgress = (progress: ProcessingProgress) => {
         setProcessingStep(progress.step);
         setProcessingProgress(progress.progress);
       };
-
+      
+      console.log('🚀 Llamando a processVideo360...');
       const processedBlob = await processVideo360(
         videoBlob,
         styleConfig,
         duration,
+        overlayPNG,
         onProgress
       );
-
       const url = URL.createObjectURL(processedBlob);
       setVideoUrl(url);
       setIsProcessing(false);
-
     } catch (error: any) {
-      console.error('Error procesando video:', error);
-      setError(error.message || 'Error procesando el video');
+      setError(error.message || "Error procesando el video");
       setIsProcessing(false);
     }
   };
@@ -78,7 +97,7 @@ export default function VideoPreview({ videoBlob, styleConfig, duration, onResta
 
   const uploadToGoogleDrive = async () => {
     setIsUploading(true);
-    
+
     // TODO: Implementar subida real a Google Drive
     try {
       await new Promise(resolve => setTimeout(resolve, 3000));

@@ -11,6 +11,8 @@
   "dependencies": {
     "@ffmpeg/ffmpeg": "^0.12.15",
     "@ffmpeg/util": "^0.12.2",
+    "@types/fabric": "^5.3.10",
+    "fabric": "^6.7.1",
     "next": "15.4.5",
     "react": "19.1.0",
     "react-dom": "19.1.0"

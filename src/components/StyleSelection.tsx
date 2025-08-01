@@ -10,9 +10,11 @@
 import { useState, useEffect } from "react";
 import Image from "next/image";
 import { StyleConfig } from "@/utils/VideoProcessor";
+import { generateOverlayPNG } from "@/utils/OverlayGenerator";
+import { generateSimpleOverlayPNG } from "@/utils/SimpleOverlayGenerator";
 
 interface StyleSelectionProps {
-  onContinue: (styleConfig: StyleConfig) => void;
+  onContinue: (styleConfig: StyleConfig, overlayPNG: Blob) => void;
   onBack: () => void;
 }
 
@@ -61,8 +63,10 @@ export default function StyleSelection({ onContinue, onBack }: StyleSelectionPro
   const [customFrameColor, setCustomFrameColor] = useState<string>("#8B5CF6"); // Purple por defecto
   const [customText, setCustomText] = useState<string>("¡Mi momento 360°!");
   const [selectedFont, setSelectedFont] = useState<string>("montserrat");
+  const [selectedTextColor, setSelectedTextColor] = useState<string>("white");
   const [isPlayingPreview, setIsPlayingPreview] = useState<string | null>(null);
   const [currentAudio, setCurrentAudio] = useState<HTMLAudioElement | null>(null);
+  
 
   const handleMusicPreview = async (musicId: string) => {
     // Detener audio actual si existe
@@ -118,21 +122,37 @@ export default function StyleSelection({ onContinue, onBack }: StyleSelectionPro
     }
   };
 
-  const handleContinue = () => {
+  const handleContinue = async () => {
     // Detener audio si está reproduciéndose
     if (currentAudio) {
       currentAudio.pause();
       currentAudio.currentTime = 0;
     }
-
     const styleConfig: StyleConfig = {
       music: selectedMusic !== "none" ? selectedMusic : undefined,
       frame: selectedFrame !== "none" ? selectedFrame : undefined,
       frameColor: selectedFrame === "custom" ? customFrameColor : undefined,
       text: customText,
       textFont: selectedFont,
+      textColor: selectedTextColor,
     };
-    onContinue(styleConfig);
+    // Genera el PNG dinámico con fallback robusto
+    try {
+      console.log('🎨 Intentando generar overlay con fabric.js...');
+      const overlayPNG = await generateOverlayPNG(styleConfig);
+      console.log('✅ Overlay generado con fabric.js exitosamente');
+      onContinue(styleConfig, overlayPNG);
+    } catch (fabricError) {
+      console.warn('⚠️ Fabric.js falló, usando canvas nativo:', fabricError);
+      try {
+        const overlayPNG = await generateSimpleOverlayPNG(styleConfig);
+        console.log('✅ Overlay generado con canvas nativo exitosamente');
+        onContinue(styleConfig, overlayPNG);
+      } catch (canvasError) {
+        console.error('❌ Error generando overlay:', canvasError);
+        alert('Error generando el overlay. Inténtalo de nuevo.');
+      }
+    }
   };
 
   const selectedFontStyle = FONT_OPTIONS.find(f => f.id === selectedFont)?.style || {};
