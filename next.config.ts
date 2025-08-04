@@ -1,7 +1,9 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  /* Configuración optimizada para FFmpeg.wasm en Next.js */
+  
+  // Headers necesarios para SharedArrayBuffer y FFmpeg.wasm
   async headers() {
     return [
       {
@@ -18,6 +20,21 @@ const nextConfig: NextConfig = {
         ],
       },
     ];
+  },
+
+  // Optimización para WebAssembly
+  webpack: (config, { isServer }) => {
+    // Optimización para FFmpeg.wasm
+    if (!isServer) {
+      config.resolve.fallback = {
+        ...config.resolve.fallback,
+        fs: false,
+        path: false,
+        os: false,
+      };
+    }
+
+    return config;
   },
 };
 

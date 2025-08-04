@@ -63,7 +63,8 @@ class VideoProcessor {
   ): Promise<void> {
     onProgress?.({ step: "Cargando FFmpeg...", progress: 0, total: 100 });
     
-    const baseURL = "https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd";
+    // Configuración optimizada para Next.js - versión UMD estable
+    const baseURL = "https://unpkg.com/@ffmpeg/core@0.12.10/dist/umd";
     
     this.ffmpeg.on("log", ({ message }) => {
       if (message.includes("time=") || /error|failed|unable/i.test(message)) {

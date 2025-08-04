@@ -9,6 +9,7 @@
 "use client";
 
 import { useState } from "react";
+import NoSSRWrapper from "@/components/NoSSRWrapper";
 import CameraSetup from "@/components/CameraSetup";
 import StyleSelection from "@/components/StyleSelection";
 import RecordingScreen from "@/components/RecordingScreen";
@@ -143,7 +144,11 @@ export default function Home() {
     }
   };
 
-  return renderCurrentScreen();
+  return (
+    <NoSSRWrapper>
+      {renderCurrentScreen()}
+    </NoSSRWrapper>
+  );
 }
 
 // Componente de la pantalla de bienvenida (extraído para mejor organización)
