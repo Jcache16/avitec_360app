@@ -61,7 +61,7 @@ class VideoProcessor {
   private async performLoad(
     onProgress?: (progress: ProcessingProgress) => void
   ): Promise<void> {
-    onProgress?.({ step: "Cargando FFmpeg...", progress: 0, total: 100 });
+    onProgress?.({ step: "💻 Cargando FFmpeg en tu dispositivo...", progress: 0, total: 100 });
     
     // Configuración optimizada para Next.js - versión UMD estable
     const baseURL = "https://unpkg.com/@ffmpeg/core@0.12.10/dist/umd";
@@ -125,7 +125,7 @@ class VideoProcessor {
       
       this.isLoaded = true;
       console.log('✅ FFmpeg completamente cargado y FS verificado');
-      onProgress?.({ step: "FFmpeg cargado", progress: 5, total: 100 });
+      onProgress?.({ step: "✅ FFmpeg listo en tu dispositivo", progress: 5, total: 100 });
     } catch (error) {
       console.error('❌ Error cargando FFmpeg:', error);
       this.isLoaded = false;
@@ -156,7 +156,7 @@ class VideoProcessor {
   
   try {
     await this.load(onProgress);
-    onProgress?.({ step: "Preparando archivos...", progress: 10, total: 100 });
+    onProgress?.({ step: "💻 Preparando archivos en tu dispositivo...", progress: 10, total: 100 });
 
     // Verificar estado inicial de FFmpeg
     console.log('🔧 Estado inicial de FFmpeg...');
@@ -244,19 +244,19 @@ class VideoProcessor {
       throw new Error(`No se pudo procesar el overlay PNG: ${overlayError instanceof Error ? overlayError.message : String(overlayError)}`);
     }
 
-    onProgress?.({ step: "Efectos de velocidad...", progress: 20, total: 100 });
+    onProgress?.({ step: "💻 Aplicando efectos de velocidad...", progress: 20, total: 100 });
     await this.createSpeedEffectSegments(normalDuration, slowmoDuration);
 
-    onProgress?.({ step: "Uniendo y normalizando...", progress: 50, total: 100 });
+    onProgress?.({ step: "💻 Uniendo y normalizando segmentos...", progress: 50, total: 100 });
     await this.concatenateAndNormalizeSegments();
 
-    onProgress?.({ step: "Aplicando overlay...", progress: 70, total: 100 });
+    onProgress?.({ step: "💻 Aplicando overlay personalizado...", progress: 70, total: 100 });
     await this.applyOverlayPNG("normalized.mp4", "styled.mp4");
 
-    onProgress?.({ step: "Aplicando música...", progress: 85, total: 100 });
+    onProgress?.({ step: "💻 Aplicando música seleccionada...", progress: 85, total: 100 });
     await this.applyMusic("styled.mp4", "output.mp4", styles);
 
-    onProgress?.({ step: "Finalizando...", progress: 95, total: 100 });
+    onProgress?.({ step: "💻 Finalizando procesamiento local...", progress: 95, total: 100 });
     const outputData = await this.ffmpeg.readFile("output.mp4");
     if (!outputData || outputData.length === 0) {
       throw new Error("El archivo de salida está vacío.");
@@ -271,7 +271,7 @@ class VideoProcessor {
       dataType: outputData.constructor.name
     });
     
-    onProgress?.({ step: "Completado", progress: 100, total: 100 });
+    onProgress?.({ step: "✅ Video completado en tu dispositivo", progress: 100, total: 100 });
     
     // OPTIMIZACIÓN: Log de rendimiento para monitorear mejoras
     const endTime = performance.now();

@@ -291,9 +291,41 @@ export default function VideoPreview({
             </div>
           </div>
 
-          <h2 className="text-2xl font-bold text-white mb-4">
+          <h2 className="text-2xl font-bold text-white mb-2">
             Procesando tu video
           </h2>
+          
+          {/* Indicador de ubicación de procesamiento */}
+          <div className="mb-4">
+            {processingStep.includes('🌐') || processingStep.includes('servidor') || processingStep.includes('REMOTO') ? (
+              <div className="bg-green-500/20 border border-green-500/30 rounded-xl px-4 py-2">
+                <p className="text-green-300 text-sm font-medium">
+                  🌐 Procesando en SERVIDOR REMOTO
+                </p>
+                <p className="text-green-200/70 text-xs">
+                  Mayor velocidad y mejor rendimiento
+                </p>
+              </div>
+            ) : processingStep.includes('💻') || processingStep.includes('LOCAL') || processingStep.includes('dispositivo') ? (
+              <div className="bg-blue-500/20 border border-blue-500/30 rounded-xl px-4 py-2">
+                <p className="text-blue-300 text-sm font-medium">
+                  💻 Procesando en TU DISPOSITIVO
+                </p>
+                <p className="text-blue-200/70 text-xs">
+                  Procesamiento local seguro y privado
+                </p>
+              </div>
+            ) : (
+              <div className="bg-purple-500/20 border border-purple-500/30 rounded-xl px-4 py-2">
+                <p className="text-purple-300 text-sm font-medium">
+                  🔍 Evaluando opciones de procesamiento
+                </p>
+                <p className="text-purple-200/70 text-xs">
+                  Buscando la mejor opción disponible
+                </p>
+              </div>
+            )}
+          </div>
           
           <p className="text-white/70 mb-6">
             {processingStep}
@@ -306,9 +338,33 @@ export default function VideoPreview({
             ></div>
           </div>
 
-          <p className="text-white/50 text-sm">
-            {processingProgress}% completado
-          </p>
+          <div className="flex justify-between items-center text-white/50 text-sm mb-2">
+            <span>{processingProgress}% completado</span>
+            <span>
+              {processingStep.includes('🌐') || processingStep.includes('servidor') || processingStep.includes('REMOTO') 
+                ? '⚡ Rápido' 
+                : processingStep.includes('💻') || processingStep.includes('LOCAL') || processingStep.includes('dispositivo')
+                ? '🔒 Privado'
+                : '🔍 Evaluando'
+              }
+            </span>
+          </div>
+          
+          {/* Estimación de tiempo restante */}
+          <div className="text-center">
+            <p className="text-white/40 text-xs">
+              {processingProgress < 20 
+                ? "Inicializando procesamiento..." 
+                : processingProgress < 50 
+                ? "Aplicando efectos de video..." 
+                : processingProgress < 80 
+                ? "Añadiendo elementos visuales..." 
+                : processingProgress < 95 
+                ? "Optimizando video final..." 
+                : "Casi listo..."
+              }
+            </p>
+          </div>
         </div>
       </div>
     );

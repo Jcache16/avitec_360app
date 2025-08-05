@@ -14,9 +14,10 @@ const BACKEND_TIMEOUT = 10000; // 10 segundos timeout para verificar backend
 /**
  * 🔧 Verificar estado del backend con timeout
  */
-export const checkBackendHealth = async (): Promise<boolean> => {
+export const checkBackendHealth = async (onProgress?: (progress: ProcessingProgress) => void): Promise<boolean> => {
   try {
     console.log('🔍 Verificando disponibilidad del backend...');
+    onProgress?.({ step: "🔍 Verificando conexión con el servidor...", progress: 2, total: 100 });
     
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), BACKEND_TIMEOUT);
@@ -34,16 +35,20 @@ export const checkBackendHealth = async (): Promise<boolean> => {
     if (response.ok) {
       const data = await response.json();
       console.log('✅ Backend disponible:', data.message);
+      onProgress?.({ step: "✅ Servidor conectado exitosamente", progress: 5, total: 100 });
       return true;
     } else {
       console.warn('⚠️ Backend respondió con error:', response.status);
+      onProgress?.({ step: "⚠️ Servidor no responde, usando procesamiento local", progress: 5, total: 100 });
       return false;
     }
   } catch (error) {
     if (error instanceof Error && error.name === 'AbortError') {
       console.warn('⚠️ Timeout verificando backend');
+      onProgress?.({ step: "⏰ Servidor tardó mucho en responder, usando procesamiento local", progress: 5, total: 100 });
     } else {
       console.warn('⚠️ Error verificando backend:', error);
+      onProgress?.({ step: "❌ Error conectando al servidor, usando procesamiento local", progress: 5, total: 100 });
     }
     return false;
   }
@@ -78,16 +83,18 @@ export const processVideoInBackend = async (
       durations: { normalDuration, slowmoDuration }
     });
 
-    // Simular progreso paso a paso
+    // Simular progreso paso a paso con mensajes más descriptivos
     const progressSteps = [
-      { step: "Conectando al servidor...", progress: 5 },
-      { step: "Enviando archivos...", progress: 15 },
-      { step: "Preparando procesamiento...", progress: 25 },
-      { step: "Aplicando efectos de velocidad...", progress: 45 },
-      { step: "Uniendo segmentos...", progress: 60 },
-      { step: "Aplicando overlay...", progress: 75 },
-      { step: "Aplicando música...", progress: 85 },
-      { step: "Optimizando para móviles...", progress: 95 }
+      { step: "🌐 Conectado al servidor remoto", progress: 10 },
+      { step: "📤 Enviando video al servidor (esto puede tardar)...", progress: 20 },
+      { step: "📤 Enviando efectos y configuración...", progress: 25 },
+      { step: "🔄 Servidor iniciando procesamiento de video...", progress: 30 },
+      { step: "⚡ Aplicando efectos de velocidad en servidor...", progress: 45 },
+      { step: "🎬 Uniendo segmentos de video en servidor...", progress: 60 },
+      { step: "🎨 Aplicando overlay personalizado en servidor...", progress: 75 },
+      { step: "🎵 Aplicando música seleccionada en servidor...", progress: 85 },
+      { step: "📱 Optimizando para dispositivos móviles en servidor...", progress: 92 },
+      { step: "⬇️ Descargando video procesado del servidor...", progress: 98 }
     ];
 
     let progressIndex = 0;
@@ -140,7 +147,7 @@ export const processVideoInBackend = async (
       throw new Error('El video procesado del backend está vacío');
     }
 
-    onProgress?.({ step: "Completado en servidor", progress: 100, total: 100 });
+    onProgress?.({ step: "✅ Video procesado exitosamente en servidor", progress: 100, total: 100 });
     
     return processedBlob;
     
@@ -168,14 +175,14 @@ export const processVideoHybrid = async (
 ): Promise<Blob> => {
   
   console.log('🎯 Iniciando procesamiento híbrido...');
-  onProgress?.({ step: "Verificando opciones de procesamiento...", progress: 1, total: 100 });
+  onProgress?.({ step: "🔍 Evaluando opciones de procesamiento...", progress: 1, total: 100 });
   
   // Verificar si el backend está disponible
-  const backendAvailable = await checkBackendHealth();
+  const backendAvailable = await checkBackendHealth(onProgress);
   
   if (backendAvailable) {
     console.log('🌐 Usando procesamiento en backend (recomendado)');
-    onProgress?.({ step: "Procesando en servidor...", progress: 3, total: 100 });
+    onProgress?.({ step: "🌐 Procesamiento REMOTO seleccionado - Mayor velocidad", progress: 8, total: 100 });
     
     try {
       return await processVideoInBackend(
@@ -188,32 +195,52 @@ export const processVideoHybrid = async (
       );
     } catch (backendError) {
       console.warn('⚠️ Backend falló, intentando procesamiento local:', backendError);
-      onProgress?.({ step: "Servidor no disponible, procesando localmente...", progress: 5, total: 100 });
+      onProgress?.({ step: "❌ Servidor falló, cambiando a procesamiento LOCAL...", progress: 10, total: 100 });
       
-      // Continuar con procesamiento local como fallback
+      // Breve pausa para que el usuario vea el mensaje
+      await new Promise(resolve => setTimeout(resolve, 1500));
     }
   } else {
     console.log('💻 Backend no disponible, usando procesamiento local');
+    onProgress?.({ step: "🔄 Servidor no disponible, iniciando modo LOCAL...", progress: 8, total: 100 });
+    // Breve pausa para que el usuario vea el mensaje
+    await new Promise(resolve => setTimeout(resolve, 1000));
   }
   
   // Fallback al procesamiento local
   console.log('💻 Usando procesamiento local (fallback)');
-  onProgress?.({ step: "Procesando en dispositivo...", progress: 5, total: 100 });
+  onProgress?.({ step: "💻 Procesamiento LOCAL activado - En tu dispositivo", progress: 12, total: 100 });
   
   try {
     // Importar dinámicamente el procesador local
     const { processVideo360 } = await import('@/utils/VideoProcessor');
+    
+    // Crear un wrapper para los mensajes de progreso local
+    const localProgressWrapper = (progress: ProcessingProgress) => {
+      // Agregar indicador de procesamiento local a todos los mensajes
+      const localizedStep = progress.step.includes('💻') 
+        ? progress.step 
+        : `💻 LOCAL: ${progress.step}`;
+      
+      onProgress?.({
+        ...progress,
+        step: localizedStep
+      });
+    };
+    
+    onProgress?.({ step: "💻 Iniciando procesamiento en tu dispositivo...", progress: 15, total: 100 });
+    
     return await processVideo360(
       videoBlob,
       styleConfig,
       normalDuration,
       slowmoDuration,
       overlayPNG,
-      onProgress
+      localProgressWrapper
     );
   } catch (localError) {
     console.error('❌ Error en procesamiento local:', localError);
-    throw new Error(`Procesamiento falló: ${localError instanceof Error ? localError.message : String(localError)}`);
+    throw new Error(`❌ Procesamiento falló completamente: ${localError instanceof Error ? localError.message : String(localError)}`);
   }
 };
 
