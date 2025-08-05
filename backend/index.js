@@ -161,8 +161,7 @@ class VideoProcessor {
       '-level', '3.0',           // Level compatible con dispositivos antiguos
       '-pix_fmt', 'yuv420p',     // Formato de pixel estándar para móviles
       '-movflags', '+faststart', // Optimización para streaming/reproducción inmediata
-      '-c:a', 'aac',
-      '-b:a', '128k'             // Bitrate de audio estándar para móviles
+      '-an'                      // CRÍTICO: Eliminar audio original desde el inicio
     ];
 
     // Segmento 1: Video normal
@@ -177,12 +176,12 @@ class VideoProcessor {
         .run();
     });
 
-    // Segmento 2: Video slow motion
+    // Segmento 2: Video slow motion (SIN audio original)
     await new Promise((resolve, reject) => {
       ffmpeg(path.join(this.workingDir, 'input.mp4'))
         .inputOptions(['-ss', String(normalDuration), '-t', String(slowmoDuration)])
         .videoFilters(`setpts=2.0*PTS,${scaleFilter}`)
-        .audioFilters('atempo=0.5')
+        // NO audioFilters - eliminar audio completamente
         .outputOptions(commonOptions)
         .output(path.join(this.workingDir, 'seg2.mp4'))
         .on('end', resolve)
@@ -196,26 +195,41 @@ class VideoProcessor {
   async concatenateAndNormalizeSegments() {
     console.log('🔗 Concatenando segmentos');
     
-    // Crear lista de concatenación
-    const concatList = `file 'seg1.mp4'\\nfile 'seg2.mp4'`;
-    await fs.writeFile(path.join(this.workingDir, 'concat_list.txt'), concatList);
+    // CRÍTICO: Crear lista de concatenación con formato correcto
+    const concatListPath = path.join(this.workingDir, 'concat_list.txt');
+    const concatContent = `file 'seg1.mp4'\nfile 'seg2.mp4'`;
+    
+    console.log('📝 Creando concat_list.txt en:', concatListPath);
+    await fs.writeFile(concatListPath, concatContent, 'utf8');
+    
+    // Verificar que el archivo se creó correctamente
+    if (!await fs.pathExists(concatListPath)) {
+      throw new Error('No se pudo crear concat_list.txt');
+    }
+    console.log('✅ concat_list.txt creado exitosamente');
 
     // Concatenar segmentos
     await new Promise((resolve, reject) => {
       ffmpeg()
-        .input(path.join(this.workingDir, 'concat_list.txt'))
+        .input(concatListPath)
         .inputOptions(['-f', 'concat', '-safe', '0'])
         .outputOptions(['-c', 'copy'])
         .output(path.join(this.workingDir, 'concatenated.mp4'))
         .on('end', resolve)
-        .on('error', reject)
+        .on('error', (err) => {
+          console.error('❌ Error en concatenación:', err);
+          reject(err);
+        })
         .run();
     });
 
-    // Normalizar
+    // Normalizar (eliminar audio original para evitar micrófono)
     await new Promise((resolve, reject) => {
       ffmpeg(path.join(this.workingDir, 'concatenated.mp4'))
-        .outputOptions(['-c', 'copy'])
+        .outputOptions([
+          '-c:v', 'copy',
+          '-an'  // CRÍTICO: Eliminar todo audio original (micrófono)
+        ])
         .output(path.join(this.workingDir, 'normalized.mp4'))
         .on('end', resolve)
         .on('error', reject)
@@ -225,10 +239,10 @@ class VideoProcessor {
     // Limpiar archivos intermedios
     await fs.remove(path.join(this.workingDir, 'seg1.mp4'));
     await fs.remove(path.join(this.workingDir, 'seg2.mp4'));
-    await fs.remove(path.join(this.workingDir, 'concat_list.txt'));
+    await fs.remove(concatListPath);
     await fs.remove(path.join(this.workingDir, 'concatenated.mp4'));
 
-    console.log('✅ Segmentos concatenados y normalizados');
+    console.log('✅ Segmentos concatenados y normalizados (sin audio original)');
   }
 
   async applyOverlayPNG() {
@@ -266,8 +280,19 @@ class VideoProcessor {
     const outputFile = path.join(this.workingDir, 'output.mp4');
 
     if (!styleConfig.music || styleConfig.music === "none") {
-      console.log('🎵 Sin música seleccionada, copiando archivo directamente');
-      await fs.copy(inputFile, outputFile);
+      console.log('🎵 Sin música seleccionada, copiando archivo sin audio');
+      // CRÍTICO: Si no hay música, asegurar que no hay audio del micrófono
+      await new Promise((resolve, reject) => {
+        ffmpeg(inputFile)
+          .outputOptions([
+            '-c:v', 'copy',
+            '-an'  // Eliminar cualquier audio original
+          ])
+          .output(outputFile)
+          .on('end', resolve)
+          .on('error', reject)
+          .run();
+      });
       return;
     }
 
@@ -275,43 +300,73 @@ class VideoProcessor {
     const musicOption = MUSIC_OPTIONS.find(m => m.id === styleConfig.music);
     
     if (!musicOption || !musicOption.file) {
-      console.warn('⚠️ Música no encontrada, continuando sin música');
-      await fs.copy(inputFile, outputFile);
+      console.warn('⚠️ Música no encontrada, continuando sin audio');
+      await new Promise((resolve, reject) => {
+        ffmpeg(inputFile)
+          .outputOptions(['-c:v', 'copy', '-an'])
+          .output(outputFile)
+          .on('end', resolve)
+          .on('error', reject)
+          .run();
+      });
       return;
     }
 
     const musicPath = path.join(__dirname, 'assets', 'music', musicOption.file);
     
     if (!await fs.pathExists(musicPath)) {
-      console.warn('⚠️ Archivo de música no existe, continuando sin música');
-      await fs.copy(inputFile, outputFile);
+      console.warn('⚠️ Archivo de música no existe:', musicPath);
+      console.warn('⚠️ Continuando sin audio');
+      await new Promise((resolve, reject) => {
+        ffmpeg(inputFile)
+          .outputOptions(['-c:v', 'copy', '-an'])
+          .output(outputFile)
+          .on('end', resolve)
+          .on('error', reject)
+          .run();
+      });
       return;
     }
+
+    console.log('🎵 Archivo de música encontrado:', musicPath);
 
     try {
       await new Promise((resolve, reject) => {
         ffmpeg(inputFile)
           .input(musicPath)
           .outputOptions([
-            '-c:v', 'copy',
-            '-c:a', 'aac',
-            '-b:a', '128k',
-            '-profile:v', 'baseline',  // Mantener profile compatible
-            '-movflags', '+faststart', // Optimización para móviles
-            '-map', '0:v:0',
-            '-map', '1:a:0',
-            '-shortest'
+            '-c:v', 'copy',         // No re-encodear video
+            '-c:a', 'aac',          // Codec de audio
+            '-b:a', '128k',         // Bitrate de audio
+            '-map', '0:v:0',        // CRÍTICO: Mapear solo video del input
+            '-map', '1:a:0',        // CRÍTICO: Mapear solo audio de la música
+            '-shortest',            // Duración del video más corto
+            '-avoid_negative_ts', 'make_zero'  // Evitar timestamps negativos
           ])
           .output(outputFile)
+          .on('start', (commandLine) => {
+            console.log('🎵 Comando FFmpeg para música:', commandLine);
+          })
           .on('end', resolve)
-          .on('error', reject)
+          .on('error', (err) => {
+            console.error('❌ Error aplicando música:', err);
+            reject(err);
+          })
           .run();
       });
       
       console.log('✅ Música aplicada exitosamente');
     } catch (musicError) {
-      console.warn('⚠️ Error aplicando música, creando sin audio:', musicError);
-      await fs.copy(inputFile, outputFile);
+      console.warn('⚠️ Error aplicando música, creando video sin audio:', musicError);
+      // Fallback: crear video sin audio
+      await new Promise((resolve, reject) => {
+        ffmpeg(inputFile)
+          .outputOptions(['-c:v', 'copy', '-an'])
+          .output(outputFile)
+          .on('end', resolve)
+          .on('error', reject)
+          .run();
+      });
     }
 
     // Limpiar archivo intermedio
@@ -613,6 +668,16 @@ app.listen(PORT, async () => {
   console.log(`   • Resolución de salida: 480x854 (9:16)`);
   console.log(`   • Optimizaciones: ultrafast preset, CRF 30`);
   console.log(`   • Límite de archivo: 100MB`);
+  
+  // Verificar archivos de música al iniciar
+  console.log(`🎵 Verificando archivos de música:`);
+  for (const music of MUSIC_OPTIONS) {
+    if (music.file) {
+      const musicPath = path.join(__dirname, 'assets', 'music', music.file);
+      const exists = await fs.pathExists(musicPath);
+      console.log(`   • ${music.name}: ${exists ? '✅' : '❌'} (${musicPath})`);
+    }
+  }
   
   // Limpiar archivos antiguos al iniciar
   await cleanupOldFiles();
