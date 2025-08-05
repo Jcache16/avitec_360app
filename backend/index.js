@@ -34,10 +34,13 @@ app.use(express.urlencoded({ limit: '50mb', extended: true }));
 // 📁 Configuración de multer para subida de archivos
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    cb(null, 'uploads/');
+    const dir = path.join(__dirname, 'uploads');
+    fs.ensureDirSync(dir);
+    cb(null, dir);
   },
   filename: (req, file, cb) => {
-    const uniqueName = `${uuidv4()}-${Date.now()}.${file.originalname.split('.').pop()}`;
+    // Mantener la extensión original del archivo
+    const uniqueName = `${uuidv4()}-${Date.now()}${path.extname(file.originalname)}`;
     cb(null, uniqueName);
   }
 });
@@ -75,6 +78,7 @@ class VideoProcessor {
   constructor() {
     this.workingDir = path.join(__dirname, 'temp', uuidv4());
     this.outputDir = path.join(__dirname, 'processed');
+    this.ffmpegTimeout = 300; // 5 minutos de timeout por comando
   }
 
   async initialize() {
@@ -101,14 +105,18 @@ class VideoProcessor {
       onProgress?.({ step: "Preparando archivos...", progress: 10, total: 100 });
 
       // Copiar archivos al directorio de trabajo
-      const inputVideo = path.join(this.workingDir, 'input.mp4');
+      const originalInput = path.join(this.workingDir, `original-input${path.extname(videoPath)}`);
       const overlayPng = path.join(this.workingDir, 'overlay.png');
       
-      await fs.copy(videoPath, inputVideo);
+      await fs.copy(videoPath, originalInput);
       await fs.copy(overlayPath, overlayPng);
 
+      // 💡 NUEVO: Normalizar video a MP4 H.264
+      onProgress?.({ step: "Normalizando formato de video...", progress: 15, total: 100 });
+      const inputVideo = await this.normalizeInputVideo(originalInput);
+
       onProgress?.({ step: "Efectos de velocidad...", progress: 20, total: 100 });
-      await this.createSpeedEffectSegments(normalDuration, slowmoDuration);
+      await this.createSpeedEffectSegments(inputVideo, normalDuration, slowmoDuration);
 
       onProgress?.({ step: "Uniendo y normalizando...", progress: 50, total: 100 });
       await this.concatenateAndNormalizeSegments();
@@ -149,7 +157,38 @@ class VideoProcessor {
     }
   }
 
-  async createSpeedEffectSegments(normalDuration, slowmoDuration) {
+  // 💡 NUEVO: Paso de normalización de video
+  async normalizeInputVideo(inputPath) {
+    console.log(`🔄 Normalizando video de entrada: ${path.basename(inputPath)}`);
+    const outputPath = path.join(this.workingDir, 'input.mp4');
+    
+    await new Promise((resolve, reject) => {
+      ffmpeg(inputPath)
+        .outputOptions([
+          '-c:v', 'libx264',
+          '-profile:v', 'baseline',
+          '-level', '3.0',
+          '-pix_fmt', 'yuv420p',
+          '-preset', 'ultrafast',
+          '-an' // Eliminar audio original para evitar problemas de códec
+        ])
+        .output(outputPath)
+        .on('end', () => {
+          console.log('✅ Video normalizado a H.264 MP4');
+          resolve(outputPath);
+        })
+        .on('error', (err) => {
+          console.error('❌ Error normalizando video:', err);
+          reject(err);
+        })
+        .run();
+    });
+    
+    await fs.remove(inputPath); // Limpiar el video original
+    return outputPath;
+  }
+  
+  async createSpeedEffectSegments(inputVideoPath, normalDuration, slowmoDuration) {
     console.log('🎬 Creando segmentos de velocidad (sin estiramientos)');
     
     const scaleFilter = "scale=480:854:force_original_aspect_ratio=decrease,pad=480:854:(ow-iw)/2:(oh-ih)/2,setsar=1";
@@ -166,7 +205,7 @@ class VideoProcessor {
 
     // Segmento 1: Video normal
     await new Promise((resolve, reject) => {
-      ffmpeg(path.join(this.workingDir, 'input.mp4'))
+      ffmpeg(inputVideoPath)
         .inputOptions(['-t', String(normalDuration)])
         .videoFilters(scaleFilter)
         .outputOptions(commonOptions)
@@ -176,12 +215,11 @@ class VideoProcessor {
         .run();
     });
 
-    // Segmento 2: Video slow motion (SIN audio original)
+    // Segmento 2: Video slow motion
     await new Promise((resolve, reject) => {
-      ffmpeg(path.join(this.workingDir, 'input.mp4'))
+      ffmpeg(inputVideoPath)
         .inputOptions(['-ss', String(normalDuration), '-t', String(slowmoDuration)])
         .videoFilters(`setpts=2.0*PTS,${scaleFilter}`)
-        // NO audioFilters - eliminar audio completamente
         .outputOptions(commonOptions)
         .output(path.join(this.workingDir, 'seg2.mp4'))
         .on('end', resolve)
@@ -251,18 +289,15 @@ class VideoProcessor {
     await new Promise((resolve, reject) => {
       ffmpeg(path.join(this.workingDir, 'normalized.mp4'))
         .input(path.join(this.workingDir, 'overlay.png'))
-        .complexFilter([
-          '[0:v][1:v]overlay=0:0:format=auto'
-        ])
+        .complexFilter('[0:v][1:v]overlay=0:0:format=auto')
         .outputOptions([
           '-c:v', 'libx264',
           '-preset', 'ultrafast',
           '-crf', '30',
-          '-profile:v', 'baseline',  // CRÍTICO: Profile H.264 compatible con móviles
-          '-level', '3.0',           // Level compatible con dispositivos antiguos
-          '-pix_fmt', 'yuv420p',     // Formato de pixel estándar para móviles
-          '-movflags', '+faststart', // Optimización para streaming/reproducción inmediata
-          '-c:a', 'copy'
+          '-profile:v', 'baseline',
+          '-level', '3.0',
+          '-pix_fmt', 'yuv420p',
+          '-movflags', '+faststart',
         ])
         .output(path.join(this.workingDir, 'styled.mp4'))
         .on('end', resolve)
@@ -280,20 +315,9 @@ class VideoProcessor {
     const outputFile = path.join(this.workingDir, 'output.mp4');
 
     if (!styleConfig.music || styleConfig.music === "none") {
-      console.log('🎵 Sin música seleccionada, copiando archivo sin audio');
-      // CRÍTICO: Si no hay música, asegurar que no hay audio del micrófono
-      await new Promise((resolve, reject) => {
-        ffmpeg(inputFile)
-          .outputOptions([
-            '-c:v', 'copy',
-            '-an'  // Eliminar cualquier audio original
-          ])
-          .output(outputFile)
-          .on('end', resolve)
-          .on('error', reject)
-          .run();
-      });
-      return;
+        console.log('🎵 Sin música seleccionada, finalizando video sin audio.');
+        await fs.move(inputFile, outputFile);
+        return;
     }
 
     console.log(`🎵 Aplicando música: ${styleConfig.music}`);
@@ -301,30 +325,15 @@ class VideoProcessor {
     
     if (!musicOption || !musicOption.file) {
       console.warn('⚠️ Música no encontrada, continuando sin audio');
-      await new Promise((resolve, reject) => {
-        ffmpeg(inputFile)
-          .outputOptions(['-c:v', 'copy', '-an'])
-          .output(outputFile)
-          .on('end', resolve)
-          .on('error', reject)
-          .run();
-      });
+      await fs.move(inputFile, outputFile);
       return;
     }
 
     const musicPath = path.join(__dirname, 'assets', 'music', musicOption.file);
     
     if (!await fs.pathExists(musicPath)) {
-      console.warn('⚠️ Archivo de música no existe:', musicPath);
-      console.warn('⚠️ Continuando sin audio');
-      await new Promise((resolve, reject) => {
-        ffmpeg(inputFile)
-          .outputOptions(['-c:v', 'copy', '-an'])
-          .output(outputFile)
-          .on('end', resolve)
-          .on('error', reject)
-          .run();
-      });
+      console.warn('⚠️ Archivo de música no existe, continuando sin audio:', musicPath);
+      await fs.move(inputFile, outputFile);
       return;
     }
 
@@ -335,41 +344,26 @@ class VideoProcessor {
         ffmpeg(inputFile)
           .input(musicPath)
           .outputOptions([
-            '-c:v', 'copy',         // No re-encodear video
-            '-c:a', 'aac',          // Codec de audio
-            '-b:a', '128k',         // Bitrate de audio
-            '-map', '0:v:0',        // CRÍTICO: Mapear solo video del input
-            '-map', '1:a:0',        // CRÍTICO: Mapear solo audio de la música
-            '-shortest',            // Duración del video más corto
-            '-avoid_negative_ts', 'make_zero'  // Evitar timestamps negativos
+            '-c:v', 'copy',
+            '-c:a', 'aac',
+            '-b:a', '128k',
+            '-map', '0:v:0',
+            '-map', '1:a:0',
+            '-shortest',
+            '-avoid_negative_ts', 'make_zero'
           ])
           .output(outputFile)
-          .on('start', (commandLine) => {
-            console.log('🎵 Comando FFmpeg para música:', commandLine);
-          })
           .on('end', resolve)
-          .on('error', (err) => {
-            console.error('❌ Error aplicando música:', err);
-            reject(err);
-          })
+          .on('error', reject)
           .run();
       });
       
       console.log('✅ Música aplicada exitosamente');
     } catch (musicError) {
       console.warn('⚠️ Error aplicando música, creando video sin audio:', musicError);
-      // Fallback: crear video sin audio
-      await new Promise((resolve, reject) => {
-        ffmpeg(inputFile)
-          .outputOptions(['-c:v', 'copy', '-an'])
-          .output(outputFile)
-          .on('end', resolve)
-          .on('error', reject)
-          .run();
-      });
+      await fs.move(inputFile, outputFile); // Fallback: usar el video sin música
     }
 
-    // Limpiar archivo intermedio
     await fs.remove(inputFile);
   }
 
@@ -492,8 +486,9 @@ app.get('/', (req, res) => {
   res.json({
     status: 'active',
     message: 'Servidor de procesamiento Avitec 360 ✅',
-    version: '1.0.0',
+    version: '1.1.0', // Versión actualizada
     capabilities: [
+      'Normalización de video de entrada (WebM, MOV, etc. a MP4)',
       'Procesamiento de video 480x854',
       'Efectos de velocidad (normal + slow motion)', 
       'Overlay PNG con frames y texto',
@@ -509,47 +504,50 @@ app.post('/process-video', upload.fields([
   { name: 'overlay', maxCount: 1 }
 ]), async (req, res) => {
   const processingId = uuidv4();
-  console.log(`🎬 Iniciando procesamiento ${processingId}`);
+  // 💡 MEJORA: Logging inmediato al recibir la petición
+  console.log(`[${processingId}] 📥 Petición POST /process-video recibida.`);
+  console.log(`[${processingId}] Headers:`, { 'content-type': req.headers['content-type'], 'content-length': req.headers['content-length'] });
 
   try {
-    // Validar archivos recibidos
-    if (!req.files.video || !req.files.video[0]) {
+    // 💡 MEJORA: Logging detallado de archivos y body
+    console.log(`[${processingId}] Archivos recibidos (req.files):`, req.files);
+    console.log(`[${processingId}] Body recibido (req.body):`, req.body);
+
+    if (!req.files || !req.files.video || !req.files.video[0]) {
+      console.error(`[${processingId}] ❌ Error: No se recibió el archivo de video.`);
       return res.status(400).json({ error: 'Video requerido' });
     }
 
     const videoFile = req.files.video[0];
     let overlayPath = null;
+    
+    console.log(`[${processingId}] 📹 Archivo de video recibido:`, {
+      filename: videoFile.filename,
+      originalname: videoFile.originalname,
+      mimetype: videoFile.mimetype,
+      size: videoFile.size,
+      path: videoFile.path
+    });
 
-    // Procesar configuración de estilo
     const styleConfig = JSON.parse(req.body.styleConfig || '{}');
     const normalDuration = parseFloat(req.body.normalDuration) || 5;
     const slowmoDuration = parseFloat(req.body.slowmoDuration) || 5;
 
-    console.log('📋 Configuración recibida:', {
-      processingId,
-      styleConfig,
-      normalDuration,
-      slowmoDuration,
-      videoSize: videoFile.size,
-      overlayReceived: !!req.files.overlay
-    });
+    console.log(`[${processingId}] 📋 Configuración recibida:`, { styleConfig, normalDuration, slowmoDuration });
 
-    // Generar overlay si no se proporciona
     if (req.files.overlay && req.files.overlay[0]) {
       overlayPath = req.files.overlay[0].path;
+      console.log(`[${processingId}] 🖼️ Overlay recibido:`, overlayPath);
     } else {
-      console.log('🎨 Generando overlay PNG automáticamente');
+      console.log(`[${processingId}] 🎨 Generando overlay PNG automáticamente`);
       const overlayBuffer = await OverlayGenerator.generateOverlayPNG(styleConfig);
       overlayPath = path.join(__dirname, 'temp', `overlay-${processingId}.png`);
       await fs.ensureDir(path.dirname(overlayPath));
       await fs.writeFile(overlayPath, overlayBuffer);
     }
 
-    // Función de progreso que envía actualizaciones al cliente
     const onProgress = (progress) => {
-      console.log(`📊 Progreso ${processingId}: ${progress.step} (${progress.progress}%)`);
-      // En una implementación real, podrías usar WebSockets o Server-Sent Events
-      // para enviar progreso en tiempo real
+      console.log(`[${processingId}] 📊 Progreso: ${progress.step} (${progress.progress}%)`);
     };
 
     // Procesar video
@@ -565,29 +563,27 @@ app.post('/process-video', upload.fields([
       onProgress
     );
 
-    // Enviar archivo procesado
-    console.log(`✅ Procesamiento ${processingId} completado: ${path.basename(outputPath)}`);
+    console.log(`[${processingId}] ✅ Procesamiento completado: ${path.basename(outputPath)}`);
     
     res.download(outputPath, `video-360-${processingId}.mp4`, async (err) => {
       if (err) {
-        console.error(`❌ Error enviando archivo ${processingId}:`, err);
+        console.error(`[${processingId}] ❌ Error enviando archivo:`, err);
       }
       
-      // Limpiar archivos temporales
       try {
         await fs.remove(videoFile.path);
         if (overlayPath && overlayPath.includes('temp')) {
           await fs.remove(overlayPath);
         }
         await fs.remove(outputPath);
-        console.log(`🧹 Archivos temporales ${processingId} eliminados`);
+        console.log(`[${processingId}] 🧹 Archivos temporales eliminados`);
       } catch (cleanupError) {
-        console.error(`❌ Error limpiando ${processingId}:`, cleanupError);
+        console.error(`[${processingId}] ❌ Error limpiando archivos:`, cleanupError);
       }
     });
 
   } catch (error) {
-    console.error(`❌ Error fatal procesamiento ${processingId}:`, error);
+    console.error(`[${processingId}] ❌ Error fatal en el procesamiento:`, error);
     res.status(500).json({
       error: 'Error procesando video',
       message: error.message,

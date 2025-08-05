@@ -70,7 +70,10 @@ export const processVideoInBackend = async (
   try {
     // Preparar datos del formulario
     const formData = new FormData();
-    formData.append('video', videoBlob, 'input-video.mp4');
+    
+    // 💡 CORRECCIÓN: Usar la extensión correcta (.webm) para el archivo de video
+    formData.append('video', videoBlob, 'input-video.webm');
+    
     formData.append('styleConfig', JSON.stringify(styleConfig));
     formData.append('normalDuration', String(normalDuration));
     formData.append('slowmoDuration', String(slowmoDuration));
