@@ -3,11 +3,12 @@ import { StyleConfig } from "@/utils/VideoProcessor";
 
 /**
  * Genera un PNG overlay robusto usando fabric.js v6.
+ * OPTIMIZADO: Resolución 480x854 para compatibilidad con video procesado
  */
 export async function generateOverlayPNG(
   config: StyleConfig,
-  width: number = 720,
-  height: number = 1280
+  width: number = 480,  // CORREGIDO: de 720 a 480
+  height: number = 854  // CORREGIDO: de 1280 a 854
 ): Promise<Blob> {
   return new Promise(async (resolve, reject) => {
     try {
@@ -32,25 +33,26 @@ export async function generateOverlayPNG(
         console.log('🖼️ Agregando marco:', config.frame);
         const color = config.frameColor || "#FFFFFF";
         
+        // CORREGIDO: Proporciones ajustadas para 480x854
         const outerRect = new Rect({
-          left: 11, top: 11, 
-          width: width - 22, 
-          height: height - 22,
-          rx: 44, ry: 44,
+          left: 8, top: 8,   // Reducido de 11 a 8
+          width: width - 16,  // Reducido de 22 a 16
+          height: height - 16,
+          rx: 32, ry: 32,    // Reducido de 44 a 32
           stroke: color, 
-          strokeWidth: 22,
+          strokeWidth: 16,   // Reducido de 22 a 16
           fill: "transparent", 
           selectable: false
         });
         canvas.add(outerRect);
 
         const innerRect = new Rect({
-          left: 34, top: 34, 
-          width: width - 68, 
-          height: height - 68,
-          rx: 16, ry: 16,
+          left: 24, top: 24,  // Reducido de 34 a 24
+          width: width - 48,  // Reducido de 68 a 48
+          height: height - 48,
+          rx: 12, ry: 12,    // Reducido de 16 a 12
           stroke: color + "80", 
-          strokeWidth: 8,
+          strokeWidth: 6,    // Reducido de 8 a 6
           fill: "transparent", 
           selectable: false
         });
@@ -68,34 +70,35 @@ export async function generateOverlayPNG(
         };
         const fontFamily = fontMap[config.textFont || "montserrat"] || "sans-serif";
         
+        // CORREGIDO: Proporciones ajustadas para 480x854
         const textBg = new Rect({
-          left: width / 2 - 200, 
-          top: height - 110, 
-          width: 400, 
-          height: 78,
+          left: width / 2 - 140,  // Reducido de 200 a 140
+          top: height - 80,       // Reducido de 110 a 80
+          width: 280,             // Reducido de 400 a 280
+          height: 56,             // Reducido de 78 a 56
           fill: "rgba(0,0,0,0.7)", 
           selectable: false, 
-          rx: 16, 
-          ry: 16
+          rx: 12,                 // Reducido de 16 a 12
+          ry: 12
         });
         canvas.add(textBg);
 
         const textObj = new Text(config.text, {
           left: width / 2,
-          top: height - 71,
+          top: height - 52,       // Ajustado de 71 a 52
           fontFamily,
-          fontSize: 48,
+          fontSize: 32,           // Reducido de 48 a 32
           fontWeight: "bold",
           fill: config.textColor || "#FFFFFF",
           stroke: "#000000",
-          strokeWidth: 2,
+          strokeWidth: 1.5,       // Reducido de 2 a 1.5
           originX: "center",
           originY: "center",
           shadow: new Shadow({
             color: "rgba(0,0,0,0.8)",
-            blur: 8,
-            offsetX: 2,
-            offsetY: 2
+            blur: 6,              // Reducido de 8 a 6
+            offsetX: 1.5,         // Reducido de 2 a 1.5
+            offsetY: 1.5
           }),
           selectable: false
         });
@@ -106,17 +109,18 @@ export async function generateOverlayPNG(
       if (config.music && config.music !== "none") {
         console.log('🎵 Agregando indicador de música:', config.music);
         
+        // CORREGIDO: Proporciones ajustadas para 480x854
         const musicRect = new Rect({
-          left: 36, top: 32, 
-          width: 360, height: 54,
+          left: 24, top: 24,      // Reducido de 36,32 a 24,24
+          width: 240, height: 36, // Reducido de 360,54 a 240,36
           fill: "rgba(255,255,255,0.95)", 
-          rx: 12, ry: 12, 
+          rx: 8, ry: 8,           // Reducido de 12 a 8
           selectable: false,
           shadow: new Shadow({
             color: "rgba(0,0,0,0.3)",
-            blur: 8,
+            blur: 6,              // Reducido de 8 a 6
             offsetX: 0,
-            offsetY: 4
+            offsetY: 3            // Reducido de 4 a 3
           })
         });
         canvas.add(musicRect);
@@ -126,10 +130,10 @@ export async function generateOverlayPNG(
           .replace(/\b\w/g, (l) => l.toUpperCase());
           
         const musicText = new Text("🎵 " + name, {
-          left: 56, 
-          top: 59,
+          left: 36,               // Reducido de 56 a 36
+          top: 42,                // Reducido de 59 a 42
           fontFamily: "sans-serif",
-          fontSize: 24,
+          fontSize: 16,           // Reducido de 24 a 16
           fontWeight: "600",
           fill: "#6C63FF",
           originX: "left",

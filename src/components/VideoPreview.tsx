@@ -40,6 +40,17 @@ export default function VideoPreview({
   const hasProcessedRef = useRef(false);
 
   useEffect(() => {
+    console.log('🔄 VideoPreview useEffect ejecutado');
+    console.log('📊 Estado inicial:', {
+      isProcessingRef: isProcessingRef.current,
+      hasProcessedRef: hasProcessedRef.current,
+      videoBlob: !!videoBlob,
+      videoBlobSize: videoBlob?.size,
+      overlayPNG: !!overlayPNG,
+      overlayPNGSize: overlayPNG?.size,
+      existingVideoUrl: !!videoUrl
+    });
+    
     // Prevenir ejecución doble en React Strict Mode
     if (isProcessingRef.current) {
       console.log('⚠️ Procesamiento ya en curso, omitiendo...');
@@ -47,21 +58,40 @@ export default function VideoPreview({
     }
     
     // Prevenir reprocesamiento innecesario
-    if (hasProcessedRef.current) {
-      console.log('⚠️ Ya se procesó anteriormente, omitiendo...');
+    if (hasProcessedRef.current && videoUrl) {
+      console.log('⚠️ Ya se procesó anteriormente y tenemos videoUrl, omitiendo...');
       return;
     }
 
-    // Solo procesar si tenemos ambos blobs
+    // Solo procesar si tenemos ambos blobs válidos
     if (!videoBlob || !overlayPNG) {
       console.log('⚠️ Faltan datos para procesar:', { videoBlob: !!videoBlob, overlayPNG: !!overlayPNG });
+      setError('Faltan datos necesarios para procesar el video');
+      return;
+    }
+    
+    // Validar que los blobs no estén vacíos
+    if (videoBlob.size === 0) {
+      console.error('❌ Video blob está vacío');
+      setError('El video grabado está vacío');
+      return;
+    }
+    
+    if (overlayPNG.size === 0) {
+      console.error('❌ Overlay PNG está vacío');
+      setError('El overlay generado está vacío');
       return;
     }
     
     console.log('🎯 Iniciando procesamiento único en useEffect');
     processVideo();
+    
     return () => {
-      if (videoUrl) URL.revokeObjectURL(videoUrl);
+      console.log('🧹 Limpiando useEffect');
+      if (videoUrl) {
+        URL.revokeObjectURL(videoUrl);
+        console.log('🧹 URL de video revocada');
+      }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [videoBlob, overlayPNG]);
@@ -107,7 +137,30 @@ export default function VideoPreview({
         overlayPNG,
         onProgress
       );
+      
+      // CRÍTICO: Validar el blob procesado antes de crear URL
+      console.log('🔍 Validando blob procesado:', {
+        size: processedBlob.size,
+        type: processedBlob.type,
+        constructor: processedBlob.constructor.name
+      });
+      
+      if (!processedBlob || processedBlob.size === 0) {
+        throw new Error('El video procesado está vacío o es inválido');
+      }
+      
+      if (processedBlob.type !== 'video/mp4') {
+        console.warn('⚠️ Tipo de video inesperado:', processedBlob.type);
+      }
+      
+      // Limpiar URL anterior si existe
+      if (videoUrl) {
+        URL.revokeObjectURL(videoUrl);
+      }
+      
       const url = URL.createObjectURL(processedBlob);
+      console.log('✅ URL del video creada exitosamente:', url);
+      
       setVideoUrl(url);
       setIsProcessing(false);
       hasProcessedRef.current = true; // Marcar como procesado exitosamente
@@ -123,14 +176,49 @@ export default function VideoPreview({
   };
 
   const downloadVideo = () => {
-    if (!videoUrl) return;
+    console.log('📥 Iniciando descarga de video...');
+    console.log('🔍 Estado de descarga:', {
+      videoUrl,
+      videoUrlLength: videoUrl.length,
+      hasVideoUrl: !!videoUrl,
+      videoElement: !!videoRef.current,
+      videoElementSrc: videoRef.current?.src
+    });
+    
+    if (!videoUrl) {
+      console.error('❌ No hay URL de video para descargar');
+      alert('Error: No hay video disponible para descargar');
+      return;
+    }
 
-    const link = document.createElement('a');
-    link.href = videoUrl;
-    link.download = `photobooth-360-${Date.now()}.mp4`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    try {
+      const link = document.createElement('a');
+      link.href = videoUrl;
+      link.download = `photobooth-360-${Date.now()}.mp4`;
+      
+      // CRÍTICO: Asegurar que el enlace tenga los atributos correctos
+      link.setAttribute('download', `photobooth-360-${Date.now()}.mp4`);
+      link.style.display = 'none';
+      
+      document.body.appendChild(link);
+      console.log('🔗 Enlace de descarga creado:', {
+        href: link.href,
+        download: link.download
+      });
+      
+      link.click();
+      console.log('✅ Click en enlace de descarga ejecutado');
+      
+      // Limpiar después de un breve delay
+      setTimeout(() => {
+        document.body.removeChild(link);
+        console.log('🧹 Enlace de descarga limpiado');
+      }, 100);
+      
+    } catch (error) {
+      console.error('❌ Error en descarga:', error);
+      alert('Error al iniciar la descarga. Intenta de nuevo.');
+    }
   };
 
   const uploadToGoogleDrive = async () => {
@@ -256,12 +344,26 @@ export default function VideoPreview({
               controls
               className="w-full aspect-[9/16] rounded-2xl bg-black/50"
               poster="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 320'%3E%3Crect fill='%23000' width='180' height='320'/%3E%3Ctext x='90' y='160' text-anchor='middle' fill='%23fff' font-size='16'%3ETu Video 360%3C/text%3E%3C/svg%3E"
+              onLoadStart={() => console.log('🎥 Video: LoadStart')}
+              onLoadedMetadata={() => console.log('🎥 Video: Metadata cargada')}
+              onCanPlay={() => console.log('🎥 Video: Puede reproducirse')}
+              onError={(e) => {
+                console.error('❌ Error en video element:', e);
+                console.error('❌ Video error details:', {
+                  error: e.currentTarget.error,
+                  networkState: e.currentTarget.networkState,
+                  readyState: e.currentTarget.readyState,
+                  src: e.currentTarget.src
+                });
+              }}
+              playsInline
+              preload="metadata"
             />
             
             {/* Info del video */}
             <div className="mt-4 text-center">
               <p className="text-white/70 text-sm mb-2">
-                Duración: {normalDuration + slowmoDuration}s • Formato: 9:16 • Calidad: 720p
+                Duración: {normalDuration + slowmoDuration}s • Formato: 9:16 • Calidad: 480x854
               </p>
               <div className="flex items-center justify-center gap-2 text-white/50 text-xs">
                 {styleConfig.music && styleConfig.music !== 'none' && (
@@ -310,6 +412,31 @@ export default function VideoPreview({
                 <span>Subir a Google Drive</span>
               </>
             )}
+          </button>
+          
+          {/* Botón de debug para móviles */}
+          <button
+            onClick={() => {
+              const debugInfo = {
+                videoUrl: !!videoUrl,
+                videoUrlLength: videoUrl?.length,
+                isProcessing,
+                hasProcessed: hasProcessedRef.current,
+                videoBlobSize: videoBlob?.size,
+                overlayPNGSize: overlayPNG?.size,
+                videoElement: {
+                  src: videoRef.current?.src,
+                  readyState: videoRef.current?.readyState,
+                  networkState: videoRef.current?.networkState,
+                  error: videoRef.current?.error
+                }
+              };
+              console.log('🔍 DEBUG INFO:', debugInfo);
+              alert(JSON.stringify(debugInfo, null, 2));
+            }}
+            className="bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded-xl text-sm opacity-50 hover:opacity-100 transition-all duration-300"
+          >
+            🔍 Debug Info
           </button>
         </div>
 

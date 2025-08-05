@@ -141,14 +141,17 @@ class VideoProcessor {
   overlayPNG: Blob,
   onProgress?: (progress: ProcessingProgress) => void
 ): Promise<Blob> {
-  console.log('🎬 Iniciando procesamiento de video con estilos...');
+  const startTime = performance.now(); // OPTIMIZACIÓN: Medir tiempo total de procesamiento
+  console.log('🎬 Iniciando procesamiento OPTIMIZADO de video con estilos...');
   console.log('📋 Parámetros:', {
     normalDuration,
     slowmoDuration,
     totalDuration: normalDuration + slowmoDuration,
     videoBlobSize: videoBlob.size,
     overlayBlobSize: overlayPNG.size,
-    stylesKeys: Object.keys(styles)
+    stylesKeys: Object.keys(styles),
+    resolution: '480x854 (9:16 aspect ratio, sin estiramientos)',
+    overlayResolution: '480x854 (sincronizada con video)'
   });
   
   try {
@@ -259,8 +262,29 @@ class VideoProcessor {
       throw new Error("El archivo de salida está vacío.");
     }
 
+    // CRÍTICO: Asegurar que se crea correctamente el Blob para móviles Android/iOS
     const outputBlob = new Blob([outputData], { type: "video/mp4" });
+    console.log('✅ Video final creado:', {
+      originalSize: outputData.length,
+      blobSize: outputBlob.size,
+      type: outputBlob.type,
+      dataType: outputData.constructor.name
+    });
+    
     onProgress?.({ step: "Completado", progress: 100, total: 100 });
+    
+    // OPTIMIZACIÓN: Log de rendimiento para monitorear mejoras
+    const endTime = performance.now();
+    const processingTimeSeconds = (endTime - startTime) / 1000;
+    const videoLengthSeconds = normalDuration + slowmoDuration;
+    const speedRatio = videoLengthSeconds / processingTimeSeconds;
+    
+    console.log('⏱️ ESTADÍSTICAS DE RENDIMIENTO:');
+    console.log(`   • Tiempo de procesamiento: ${processingTimeSeconds.toFixed(2)} segundos`);
+    console.log(`   • Duración del video: ${videoLengthSeconds} segundos`);
+    console.log(`   • Ratio velocidad: ${speedRatio.toFixed(3)}x (${speedRatio < 1 ? 'más lento' : 'más rápido'} que tiempo real)`);
+    console.log(`   • Video final: ${(outputBlob.size / 1024 / 1024).toFixed(2)} MB`);
+    
     await this.cleanup();
     return outputBlob;
   } catch (error) {
@@ -295,19 +319,22 @@ class VideoProcessor {
 }
 
   private async createSpeedEffectSegments(normalDuration: number, slowmoDuration: number): Promise<void> {
-    const scaleArgs = ["-vf", "scale=720:1280,setsar=1"];
+    // OPTIMIZACIÓN: Resolución 480x854 (aspect ratio 9:16) para móviles
+    // CORREGIDO: Usar scale con aspect ratio preservation para evitar estiramientos
+    const scaleArgs = ["-vf", "scale=480:854:force_original_aspect_ratio=decrease,pad=480:854:(ow-iw)/2:(oh-ih)/2,setsar=1"];
     const commonArgs = [
       "-c:v",
       "libx264",
       "-preset",
       "ultrafast",
       "-crf",
-      "28",
+      "30",
       "-c:a",
       "aac",
       "-y",
     ];
 
+    console.log('🎬 Creando segmento 1: Video normal (sin estiramientos)');
     // Segmento 1: Video normal (normalDuration segundos)
     await this.ffmpeg.exec([
       "-i",
@@ -319,6 +346,7 @@ class VideoProcessor {
       "seg1.mp4",
     ]);
     
+    console.log('🎬 Creando segmento 2: Video slow motion (sin estiramientos)');
     // Segmento 2: Video en slow motion (slowmoDuration segundos)
     await this.ffmpeg.exec([
       "-i",
@@ -328,15 +356,18 @@ class VideoProcessor {
       "-t",
       String(slowmoDuration),
       "-vf",
-      "setpts=2.0*PTS,scale=720:1280,setsar=1",
+      "setpts=2.0*PTS,scale=480:854:force_original_aspect_ratio=decrease,pad=480:854:(ow-iw)/2:(oh-ih)/2,setsar=1",
       "-af",
       "atempo=0.5",
       ...commonArgs,
       "seg2.mp4",
     ]);
+    
+    console.log('✅ Segmentos de velocidad creados sin estiramientos');
   }
 
   private async concatenateAndNormalizeSegments(): Promise<void> {
+    console.log('🔗 Concatenando segmentos');
     await this.ffmpeg.writeFile(
       "concat_list.txt",
       new TextEncoder().encode(
@@ -357,6 +388,17 @@ class VideoProcessor {
     ]);
     await this.verifyFileExists("concatenated.mp4");
 
+    // OPTIMIZACIÓN: Eliminar archivos intermedios inmediatamente para liberar memoria
+    try {
+      await this.ffmpeg.deleteFile("seg1.mp4");
+      await this.ffmpeg.deleteFile("seg2.mp4");
+      await this.ffmpeg.deleteFile("concat_list.txt");
+      console.log('🗑️ Archivos intermedios eliminados para liberar memoria');
+    } catch (cleanupError) {
+      console.warn('⚠️ Error limpiando archivos intermedios:', cleanupError);
+    }
+
+    console.log('📏 Normalizando video concatenado');
     await this.ffmpeg.exec([
       "-i",
       "concatenated.mp4",
@@ -366,12 +408,21 @@ class VideoProcessor {
       "normalized.mp4",
     ]);
     await this.verifyFileExists("normalized.mp4");
+    
+    // Eliminar archivo concatenado temporal
+    try {
+      await this.ffmpeg.deleteFile("concatenated.mp4");
+      console.log('🗑️ Archivo concatenado temporal eliminado');
+    } catch (cleanupError) {
+      console.warn('⚠️ Error limpiando concatenated.mp4:', cleanupError);
+    }
   }
 
   private async applyOverlayPNG(
     inputFile: string,
     outputFile: string
   ): Promise<void> {
+    console.log('🎨 Aplicando overlay PNG optimizado para velocidad');
     const args = [
       "-i",
       inputFile,
@@ -382,16 +433,17 @@ class VideoProcessor {
       "-c:v",
       "libx264",
       "-preset",
-      "ultrafast",
+      "ultrafast", // Preset más rápido
       "-crf",
-      "28",
+      "30", // CRF optimizado para velocidad
       "-c:a",
-      "aac",
+      "copy", // Copiar audio sin re-encodear para velocidad
       "-y",
       outputFile,
     ];
     await this.ffmpeg.exec(args);
     await this.verifyFileExists(outputFile);
+    console.log('✅ Overlay aplicado exitosamente');
   }
 
   private async applyMusic(
@@ -400,6 +452,8 @@ class VideoProcessor {
     styles: StyleConfig
   ): Promise<void> {
     if (!styles.music || styles.music === "none") {
+      // OPTIMIZACIÓN: Copia directa sin re-encodeo cuando no hay música
+      console.log('🎵 Sin música seleccionada, copiando archivo directamente');
       await this.ffmpeg.exec([
         "-i",
         inputFile,
@@ -410,20 +464,26 @@ class VideoProcessor {
       ]);
       return;
     }
+    
+    console.log(`🎵 Aplicando música: ${styles.music}`);
     try {
       await this.ffmpeg.writeFile(
         "music.mp3",
         await fetchFile(`/music/${styles.music}.mp3`)
       );
+      
+      // OPTIMIZACIÓN: Usar -c:v copy para no re-encodear video, solo mezclar audio
       await this.ffmpeg.exec([
         "-i",
         inputFile,
         "-i",
         "music.mp3",
         "-c:v",
-        "copy",
+        "copy", // No re-encodear video para velocidad
         "-c:a",
         "aac",
+        "-b:a",
+        "128k", // Bitrate de audio optimizado para móviles
         "-map",
         "0:v:0",
         "-map",
@@ -433,7 +493,18 @@ class VideoProcessor {
         outputFile,
       ]);
       await this.verifyFileExists(outputFile);
-    } catch {
+      
+      // Eliminar archivo de música temporal
+      try {
+        await this.ffmpeg.deleteFile("music.mp3");
+        console.log('🗑️ Archivo de música temporal eliminado');
+      } catch (cleanupError) {
+        console.warn('⚠️ Error limpiando music.mp3:', cleanupError);
+      }
+      
+      console.log('✅ Música aplicada exitosamente');
+    } catch (musicError) {
+      console.warn('⚠️ Error aplicando música, creando sin audio:', musicError);
       // Si falla la combinación con audio, crear sin audio
       await this.ffmpeg.exec([
         "-i",
@@ -475,26 +546,52 @@ class VideoProcessor {
   }
 
   private async cleanup(): Promise<void> {
-    console.log('🧹 Iniciando limpieza del FS...');
+    console.log('🧹 Iniciando limpieza optimizada del FS...');
     try {
       const files = await this.ffmpeg.listDir(".");
       console.log('📁 Archivos antes de limpieza:', files.map(f => f.name));
       
-      const filesToDelete = files.filter(f => !f.isDir && !['dev', 'proc', 'tmp'].includes(f.name));
-      console.log('🗑️ Archivos a eliminar:', filesToDelete.map(f => f.name));
+      // OPTIMIZACIÓN: Lista específica de archivos a eliminar para mejor rendimiento
+      const specificFilesToDelete = [
+        'input.webm', 'overlay.png', 'seg1.mp4', 'seg2.mp4', 
+        'concat_list.txt', 'concatenated.mp4', 'normalized.mp4', 
+        'styled.mp4', 'music.mp3', 'output.mp4'
+      ];
       
-      for (const file of filesToDelete) {
+      let deletedCount = 0;
+      for (const filename of specificFilesToDelete) {
+        try {
+          const fileExists = files.some(f => f.name === filename);
+          if (fileExists) {
+            await this.ffmpeg.deleteFile(filename);
+            deletedCount++;
+            console.log(`✅ Eliminado: ${filename}`);
+          }
+        } catch (deleteError) {
+          console.warn(`⚠️ No se pudo eliminar ${filename}:`, deleteError);
+        }
+      }
+      
+      // Limpieza adicional de archivos no específicos (evitando directorios del sistema)
+      const remainingFiles = files.filter(f => 
+        !f.isDir && 
+        !['dev', 'proc', 'tmp', 'home'].includes(f.name) &&
+        !specificFilesToDelete.includes(f.name)
+      );
+      
+      for (const file of remainingFiles) {
         try {
           await this.ffmpeg.deleteFile(file.name);
-          console.log(`✅ Eliminado: ${file.name}`);
+          deletedCount++;
+          console.log(`✅ Eliminado adicional: ${file.name}`);
         } catch (deleteError) {
           console.warn(`⚠️ No se pudo eliminar ${file.name}:`, deleteError);
         }
       }
       
-      console.log('✅ Limpieza completada');
+      console.log(`✅ Limpieza completada: ${deletedCount} archivos eliminados`);
     } catch (error) {
-      console.error('❌ Error durante cleanup:', error);
+      console.error('❌ Error durante cleanup optimizado:', error);
       // No relanzar el error, continuar con el procesamiento
     }
   }
