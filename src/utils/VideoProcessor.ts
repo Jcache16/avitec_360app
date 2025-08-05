@@ -329,8 +329,18 @@ class VideoProcessor {
       "ultrafast",
       "-crf",
       "30",
+      "-profile:v",
+      "baseline",      // CRÍTICO: Profile H.264 compatible con móviles Android/iOS
+      "-level",
+      "3.0",           // Level compatible con dispositivos antiguos
+      "-pix_fmt",
+      "yuv420p",       // Formato de pixel estándar para móviles
+      "-movflags",
+      "+faststart",    // Optimización para streaming/reproducción inmediata
       "-c:a",
       "aac",
+      "-b:a",
+      "128k",          // Bitrate de audio estándar para móviles
       "-y",
     ];
 
@@ -436,6 +446,14 @@ class VideoProcessor {
       "ultrafast", // Preset más rápido
       "-crf",
       "30", // CRF optimizado para velocidad
+      "-profile:v",
+      "baseline",      // CRÍTICO: Profile H.264 compatible con móviles
+      "-level",
+      "3.0",           // Level compatible con dispositivos antiguos
+      "-pix_fmt",
+      "yuv420p",       // Formato de pixel estándar para móviles
+      "-movflags",
+      "+faststart",    // Optimización para streaming/reproducción inmediata
       "-c:a",
       "copy", // Copiar audio sin re-encodear para velocidad
       "-y",
@@ -484,6 +502,10 @@ class VideoProcessor {
         "aac",
         "-b:a",
         "128k", // Bitrate de audio optimizado para móviles
+        "-profile:v",
+        "baseline",      // Mantener profile compatible con móviles
+        "-movflags",
+        "+faststart",    // Optimización para streaming/reproducción inmediata
         "-map",
         "0:v:0",
         "-map",

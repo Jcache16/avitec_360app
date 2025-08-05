@@ -8,7 +8,8 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { StyleConfig, processVideo360, ProcessingProgress } from "@/utils/VideoProcessor";
+import { StyleConfig, ProcessingProgress } from "@/utils/VideoProcessor";
+import { processVideoHybrid } from "@/utils/BackendService";
 
 interface VideoPreviewProps {
   videoBlob: Blob;
@@ -128,8 +129,8 @@ export default function VideoPreview({
         setProcessingProgress(progress.progress);
       };
       
-      console.log('🚀 Llamando a processVideo360...');
-      const processedBlob = await processVideo360(
+      console.log('🚀 Llamando a processVideoHybrid (backend + fallback local)...');
+      const processedBlob = await processVideoHybrid(
         videoBlob,
         styleConfig,
         normalDuration,
@@ -363,7 +364,7 @@ export default function VideoPreview({
             {/* Info del video */}
             <div className="mt-4 text-center">
               <p className="text-white/70 text-sm mb-2">
-                Duración: {normalDuration + slowmoDuration}s • Formato: 9:16 • Calidad: 480x854
+                Duración: {normalDuration + slowmoDuration}s • Formato: 9:16 • Calidad: 480x854 (Móvil compatible)
               </p>
               <div className="flex items-center justify-center gap-2 text-white/50 text-xs">
                 {styleConfig.music && styleConfig.music !== 'none' && (
@@ -375,6 +376,7 @@ export default function VideoPreview({
                 {styleConfig.frame && styleConfig.frame !== 'none' && (
                   <span className="bg-white/20 px-2 py-1 rounded-full">🖼️ Marco</span>
                 )}
+                <span className="bg-green-500/20 px-2 py-1 rounded-full text-green-300">📱 H.264 Mobile</span>
               </div>
             </div>
           </div>
@@ -416,27 +418,53 @@ export default function VideoPreview({
           
           {/* Botón de debug para móviles */}
           <button
-            onClick={() => {
+            onClick={async () => {
+              const { checkBackendHealth } = await import('@/utils/BackendService');
+              const backendAvailable = await checkBackendHealth();
+              
               const debugInfo = {
+                // Info básica
                 videoUrl: !!videoUrl,
                 videoUrlLength: videoUrl?.length,
                 isProcessing,
                 hasProcessed: hasProcessedRef.current,
+                
+                // Info de blobs
                 videoBlobSize: videoBlob?.size,
                 overlayPNGSize: overlayPNG?.size,
+                
+                // Info del elemento video
                 videoElement: {
                   src: videoRef.current?.src,
                   readyState: videoRef.current?.readyState,
                   networkState: videoRef.current?.networkState,
-                  error: videoRef.current?.error
+                  error: videoRef.current?.error,
+                  duration: videoRef.current?.duration,
+                  videoWidth: videoRef.current?.videoWidth,
+                  videoHeight: videoRef.current?.videoHeight
+                },
+                
+                // Info del backend
+                backend: {
+                  url: process.env.NEXT_PUBLIC_BACKEND_URL,
+                  available: backendAvailable,
+                  timeout: process.env.NEXT_PUBLIC_BACKEND_TIMEOUT
+                },
+                
+                // Info del navegador
+                browser: {
+                  userAgent: navigator.userAgent,
+                  platform: navigator.platform,
+                  cookieEnabled: navigator.cookieEnabled
                 }
               };
-              console.log('🔍 DEBUG INFO:', debugInfo);
+              
+              console.log('🔍 DEBUG INFO COMPLETO:', debugInfo);
               alert(JSON.stringify(debugInfo, null, 2));
             }}
             className="bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded-xl text-sm opacity-50 hover:opacity-100 transition-all duration-300"
           >
-            🔍 Debug Info
+            🔍 Debug Info Completo
           </button>
         </div>
 
