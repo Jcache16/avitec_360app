@@ -7,7 +7,7 @@ const nextConfig: NextConfig = {
   env: {
     NEXT_PUBLIC_BACKEND_URL: process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3000',
     NEXT_PUBLIC_USE_BACKEND: process.env.NEXT_PUBLIC_USE_BACKEND || 'true',
-    NEXT_PUBLIC_BACKEND_TIMEOUT: process.env.NEXT_PUBLIC_BACKEND_TIMEOUT || '120000'
+    NEXT_PUBLIC_BACKEND_TIMEOUT: process.env.NEXT_PUBLIC_BACKEND_TIMEOUT || '300000'
   },
   
   // Headers necesarios para SharedArrayBuffer y FFmpeg.wasm (fallback local)

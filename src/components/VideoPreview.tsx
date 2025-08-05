@@ -355,6 +355,8 @@ export default function VideoPreview({
             <p className="text-white/40 text-xs">
               {processingProgress < 20 
                 ? "Inicializando procesamiento..." 
+                : processingProgress < 30 && (processingStep.includes('activándose') || processingStep.includes('Render'))
+                ? "⏰ Activando servidor (puede tardar en móviles)..."
                 : processingProgress < 50 
                 ? "Aplicando efectos de video..." 
                 : processingProgress < 80 
@@ -364,6 +366,13 @@ export default function VideoPreview({
                 : "Casi listo..."
               }
             </p>
+            
+            {/* Mensaje especial para móviles si tarda mucho */}
+            {processingProgress > 15 && processingProgress < 30 && (processingStep.includes('servidor') || processingStep.includes('REMOTO')) && (
+              <p className="text-yellow-300/60 text-xs mt-2">
+                📱 En móviles puede tardar más. El sistema cambiará a procesamiento local si es necesario.
+              </p>
+            )}
           </div>
         </div>
       </div>

@@ -9,7 +9,7 @@ import { StyleConfig, ProcessingProgress } from '@/utils/VideoProcessor';
 
 // 🌐 Configuración del backend
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'https://avitec360-backend.onrender.com';
-const BACKEND_TIMEOUT = 10000; // 10 segundos timeout para verificar backend
+const BACKEND_TIMEOUT = 15000; // 15 segundos timeout para verificar backend (más tiempo para móviles)
 
 /**
  * 🔧 Verificar estado del backend con timeout
@@ -83,18 +83,20 @@ export const processVideoInBackend = async (
       durations: { normalDuration, slowmoDuration }
     });
 
-    // Simular progreso paso a paso con mensajes más descriptivos
+    // Simular progreso paso a paso con mensajes más descriptivos y tiempos adaptados a móviles
     const progressSteps = [
       { step: "🌐 Conectado al servidor remoto", progress: 10 },
-      { step: "📤 Enviando video al servidor (esto puede tardar)...", progress: 20 },
-      { step: "📤 Enviando efectos y configuración...", progress: 25 },
+      { step: "📤 Enviando video al servidor (puede tardar en móviles)...", progress: 15 },
+      { step: "📤 Enviando efectos y configuración...", progress: 20 },
+      { step: "⏰ Servidor activándose (Render.com puede tardar)...", progress: 25 },
       { step: "🔄 Servidor iniciando procesamiento de video...", progress: 30 },
       { step: "⚡ Aplicando efectos de velocidad en servidor...", progress: 45 },
       { step: "🎬 Uniendo segmentos de video en servidor...", progress: 60 },
-      { step: "🎨 Aplicando overlay personalizado en servidor...", progress: 75 },
-      { step: "🎵 Aplicando música seleccionada en servidor...", progress: 85 },
-      { step: "📱 Optimizando para dispositivos móviles en servidor...", progress: 92 },
-      { step: "⬇️ Descargando video procesado del servidor...", progress: 98 }
+      { step: "🎨 Aplicando overlay personalizado en servidor...", progress: 70 },
+      { step: "🎵 Aplicando música seleccionada en servidor...", progress: 80 },
+      { step: "📱 Optimizando para dispositivos móviles en servidor...", progress: 90 },
+      { step: "⬇️ Descargando video procesado del servidor...", progress: 95 },
+      { step: "🔄 Finalizando transferencia (casi listo)...", progress: 98 }
     ];
 
     let progressIndex = 0;
@@ -106,11 +108,11 @@ export const processVideoInBackend = async (
         });
         progressIndex++;
       }
-    }, 1500); // Actualizar cada 1.5 segundos
+    }, 2000); // Actualizar cada 2 segundos (más tiempo para móviles lentos)
 
-    // Realizar petición al backend con timeout extendido
+    // Realizar petición al backend con timeout extendido para móviles
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 120000); // 2 minutos timeout
+    const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 minutos timeout (mejor para móviles y Render.com)
 
     const response = await fetch(`${BACKEND_URL}/process-video`, {
       method: 'POST',
@@ -155,7 +157,7 @@ export const processVideoInBackend = async (
     console.error('❌ Error procesando video en backend:', error);
     
     if (error instanceof Error && error.name === 'AbortError') {
-      throw new Error('Timeout del servidor. El procesamiento tardó demasiado.');
+      throw new Error('⏰ El servidor tardó más de 5 minutos. Esto puede pasar en móviles o cuando Render.com está activándose. Intentando procesamiento local...');
     }
     
     throw new Error(`Error del backend: ${error instanceof Error ? error.message : String(error)}`);
@@ -195,10 +197,10 @@ export const processVideoHybrid = async (
       );
     } catch (backendError) {
       console.warn('⚠️ Backend falló, intentando procesamiento local:', backendError);
-      onProgress?.({ step: "❌ Servidor falló, cambiando a procesamiento LOCAL...", progress: 10, total: 100 });
+      onProgress?.({ step: "⏰ Servidor tardó mucho (normal en móviles), cambiando a LOCAL...", progress: 10, total: 100 });
       
       // Breve pausa para que el usuario vea el mensaje
-      await new Promise(resolve => setTimeout(resolve, 1500));
+      await new Promise(resolve => setTimeout(resolve, 2000));
     }
   } else {
     console.log('💻 Backend no disponible, usando procesamiento local');
@@ -296,4 +298,66 @@ export default {
   processVideoInBackend,
   checkBackendHealth,
   getBackendOptions
+};
+
+/**
+ * 🔍 Verificar si un video ya fue procesado (para casos de timeout)
+ * TODO: Implementar en el backend endpoint GET /video/:id
+ */
+export const checkVideoStatus = async (videoId: string): Promise<{ processed: boolean; downloadUrl?: string }> => {
+  try {
+    const response = await fetch(`${BACKEND_URL}/video/${videoId}`, {
+      method: 'GET',
+      headers: {
+        'Accept': 'application/json',
+      }
+    });
+    
+    if (!response.ok) {
+      return { processed: false };
+    }
+    
+    const data = await response.json();
+    return {
+      processed: data.processed,
+      downloadUrl: data.downloadUrl
+    };
+  } catch (error) {
+    console.warn('⚠️ Error verificando estado del video:', error);
+    return { processed: false };
+  }
+};
+
+/**
+ * 🔄 Función mejorada con reintento para videos que tardaron
+ */
+export const processVideoWithRetry = async (
+  videoBlob: Blob,
+  styleConfig: StyleConfig,
+  normalDuration: number,
+  slowmoDuration: number,
+  overlayPNG: Blob,
+  onProgress?: (progress: ProcessingProgress) => void
+): Promise<Blob> => {
+  
+  try {
+    // Intentar procesamiento normal
+    return await processVideoHybrid(videoBlob, styleConfig, normalDuration, slowmoDuration, overlayPNG, onProgress);
+  } catch (error) {
+    
+    // Si fue timeout, mostrar opción de reintento
+    if (error instanceof Error && error.message.includes('5 minutos')) {
+      onProgress?.({ step: "⏰ ¿El video puede estar listo en el servidor? Puedes reintentar", progress: 0, total: 100 });
+      
+      // TODO: Aquí se podría generar un videoId y verificar si ya está procesado
+      // const videoId = generateVideoId(videoBlob, styleConfig);
+      // const status = await checkVideoStatus(videoId);
+      // if (status.processed && status.downloadUrl) {
+      //   return await fetch(status.downloadUrl).then(r => r.blob());
+      // }
+    }
+    
+    // Si no, continuar con el error original
+    throw error;
+  }
 };
