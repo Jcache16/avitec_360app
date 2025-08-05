@@ -10,7 +10,7 @@
 import { useState, useEffect, useRef } from "react";
 
 interface CameraSetupProps {
-  onStartRecording: (normalDuration: number, slowmoDuration: number, facingMode: string) => void;
+  onStartRecording: (normalDuration: number, slowmoDuration: number, facingMode: string, selectedFile?: File) => void;
   onBack: () => void;
 }
 
@@ -21,8 +21,11 @@ export default function CameraSetup({ onStartRecording, onBack }: CameraSetupPro
   const [normalDuration, setNormalDuration] = useState(8); // Duración video normal
   const [slowmoDuration, setSlowmoDuration] = useState(7); // Duración slowmo
   const [currentFacingMode, setCurrentFacingMode] = useState<string>("user"); // Cámara seleccionada
+  const [selectedVideoFile, setSelectedVideoFile] = useState<File | null>(null); // Video seleccionado de galería
+  const [videoPreviewUrl, setVideoPreviewUrl] = useState<string | null>(null); // URL para preview del video seleccionado
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Solicitar permisos y configurar cámara
   const requestCameraAccess = async (facingMode: string = "user") => {
@@ -73,25 +76,88 @@ export default function CameraSetup({ onStartRecording, onBack }: CameraSetupPro
     }
   };
 
+  // Manejar selección de video desde galería
+  const handleVideoFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    // Validar que sea un archivo de video
+    if (!file.type.startsWith('video/')) {
+      setError('Por favor selecciona un archivo de video válido');
+      return;
+    }
+
+    // Limpiar errores previos
+    setError(null);
+
+    // Detener stream de cámara si está activo
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
+    }
+
+    // Crear URL para preview
+    const videoUrl = URL.createObjectURL(file);
+    setVideoPreviewUrl(videoUrl);
+    setSelectedVideoFile(file);
+    setHasPermission(true); // Marcar como "listo" para continuar
+
+    console.log('📁 Video seleccionado:', {
+      name: file.name,
+      size: file.size,
+      type: file.type,
+      lastModified: new Date(file.lastModified)
+    });
+  };
+
+  // Disparar selector de archivos
+  const triggerFileSelect = () => {
+    fileInputRef.current?.click();
+  };
+
+  // Volver a modo cámara
+  const switchToCamera = () => {
+    // Limpiar video seleccionado
+    if (videoPreviewUrl) {
+      URL.revokeObjectURL(videoPreviewUrl);
+      setVideoPreviewUrl(null);
+    }
+    setSelectedVideoFile(null);
+    setHasPermission(null);
+    
+    // Solicitar acceso a cámara
+    requestCameraAccess(currentFacingMode);
+  };
+
   // Limpiar stream al desmontar componente
   useEffect(() => {
     return () => {
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(track => track.stop());
       }
+      if (videoPreviewUrl) {
+        URL.revokeObjectURL(videoPreviewUrl);
+      }
     };
-  }, []);
+  }, [videoPreviewUrl]);
 
   const handleStartRecording = () => {
-    if (hasPermission && streamRef.current) {
-      // Cerrar el stream actual para evitar conflictos con RecordingScreen
-      streamRef.current.getTracks().forEach(track => track.stop());
-      streamRef.current = null;
-      
-      // Dar un poco de tiempo antes de navegar
-      setTimeout(() => {
-        onStartRecording(normalDuration, slowmoDuration, currentFacingMode);
-      }, 100);
+    if (hasPermission) {
+      // Si hay un video seleccionado, pasarlo como parámetro
+      if (selectedVideoFile) {
+        console.log('🎬 Iniciando con video seleccionado:', selectedVideoFile.name);
+        onStartRecording(normalDuration, slowmoDuration, currentFacingMode, selectedVideoFile);
+      } else if (streamRef.current) {
+        // Cerrar el stream actual para evitar conflictos con RecordingScreen
+        streamRef.current.getTracks().forEach(track => track.stop());
+        streamRef.current = null;
+        
+        // Dar un poco de tiempo antes de navegar
+        setTimeout(() => {
+          console.log('🎬 Iniciando grabación desde cámara');
+          onStartRecording(normalDuration, slowmoDuration, currentFacingMode);
+        }, 100);
+      }
     }
   };
 
@@ -125,55 +191,120 @@ export default function CameraSetup({ onStartRecording, onBack }: CameraSetupPro
         <div className="flex-1 flex flex-col justify-center mb-8">
           <div className="relative bg-black rounded-2xl overflow-hidden shadow-2xl mb-6">
             {!hasPermission ? (
-              // Estado sin permisos
+              // Estado sin permisos - Mostrar opciones
               <div className="aspect-[4/3] flex flex-col items-center justify-center p-8 text-center">
                 <div className="w-16 h-16 bg-white/10 rounded-full flex items-center justify-center mb-4">
                   <span className="text-3xl">📹</span>
                 </div>
                 <h3 className="text-white font-semibold mb-2">
-                  Acceso a la cámara
+                  Elegir fuente de video
                 </h3>
                 <p className="text-white/70 text-sm mb-6">
-                  Necesitamos acceso a tu cámara para comenzar la grabación
+                  Graba en vivo o selecciona un video existente
                 </p>
                 {error && (
                   <p className="text-red-400 text-sm mb-4 bg-red-500/20 px-3 py-2 rounded-lg">
                     {error}
                   </p>
                 )}
-                <button
-                  onClick={() => requestCameraAccess()}
-                  disabled={isLoading}
-                  className="bg-white/20 backdrop-blur-sm text-white px-6 py-3 rounded-xl font-medium hover:bg-white/30 transition-colors disabled:opacity-50"
-                >
-                  {isLoading ? "Conectando..." : "Permitir acceso"}
-                </button>
+                
+                {/* Botones de opciones */}
+                <div className="space-y-3 w-full max-w-xs">
+                  <button
+                    onClick={() => requestCameraAccess()}
+                    disabled={isLoading}
+                    className="w-full bg-gradient-to-r from-red-500 to-pink-500 text-white px-6 py-3 rounded-xl font-medium hover:from-red-600 hover:to-pink-600 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                  >
+                    <span className="text-lg">📷</span>
+                    <span>{isLoading ? "Conectando..." : "Grabar en vivo"}</span>
+                  </button>
+                  
+                  <button
+                    onClick={triggerFileSelect}
+                    className="w-full bg-white/20 backdrop-blur-sm text-white px-6 py-3 rounded-xl font-medium hover:bg-white/30 transition-colors flex items-center justify-center gap-2"
+                  >
+                    <span className="text-lg">📁</span>
+                    <span>Elegir video existente</span>
+                  </button>
+                </div>
               </div>
             ) : (
               // Vista previa activa
               <div className="relative">
-                <video
-                  ref={videoRef}
-                  autoPlay
-                  playsInline
-                  muted
-                  className="w-full aspect-[4/3] object-cover"
-                />
-                
-                {/* Controles sobre el video */}
-                <div className="absolute top-4 right-4">
-                  <button
-                    onClick={switchCamera}
-                    className="bg-black/50 backdrop-blur-sm text-white p-3 rounded-full hover:bg-black/70 transition-colors"
-                  >
-                    <span className="text-xl">🔄</span>
-                  </button>
-                </div>
-                
-                {/* Overlay de guía */}
-                <div className="absolute inset-0 border-4 border-white/30 rounded-2xl pointer-events-none">
-                  <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-32 h-32 border-2 border-white/50 rounded-full"></div>
-                </div>
+                {selectedVideoFile ? (
+                  // Preview de video seleccionado
+                  <>
+                    <video
+                      src={videoPreviewUrl || undefined}
+                      controls
+                      className="w-full aspect-[4/3] object-cover"
+                      onLoadedMetadata={(e) => {
+                        const video = e.currentTarget;
+                        console.log('📹 Video cargado:', {
+                          duration: video.duration,
+                          width: video.videoWidth,
+                          height: video.videoHeight
+                        });
+                      }}
+                    />
+                    
+                    {/* Información del archivo */}
+                    <div className="absolute top-4 left-4 bg-black/70 backdrop-blur-sm text-white px-3 py-2 rounded-lg text-sm">
+                      <div className="flex items-center gap-2">
+                        <span className="text-green-400">📁</span>
+                        <span>{selectedVideoFile.name}</span>
+                      </div>
+                      <div className="text-white/70 text-xs">
+                        {(selectedVideoFile.size / (1024 * 1024)).toFixed(1)} MB
+                      </div>
+                    </div>
+                    
+                    {/* Botón para cambiar a cámara */}
+                    <div className="absolute top-4 right-4">
+                      <button
+                        onClick={switchToCamera}
+                        className="bg-black/50 backdrop-blur-sm text-white p-3 rounded-full hover:bg-black/70 transition-colors"
+                        title="Cambiar a cámara"
+                      >
+                        <span className="text-xl">📷</span>
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  // Preview de cámara en vivo
+                  <>
+                    <video
+                      ref={videoRef}
+                      autoPlay
+                      playsInline
+                      muted
+                      className="w-full aspect-[4/3] object-cover"
+                    />
+                    
+                    {/* Controles sobre el video */}
+                    <div className="absolute top-4 right-4 flex gap-2">
+                      <button
+                        onClick={triggerFileSelect}
+                        className="bg-black/50 backdrop-blur-sm text-white p-3 rounded-full hover:bg-black/70 transition-colors"
+                        title="Elegir video existente"
+                      >
+                        <span className="text-xl">📁</span>
+                      </button>
+                      <button
+                        onClick={switchCamera}
+                        className="bg-black/50 backdrop-blur-sm text-white p-3 rounded-full hover:bg-black/70 transition-colors"
+                        title="Cambiar cámara"
+                      >
+                        <span className="text-xl">🔄</span>
+                      </button>
+                    </div>
+                    
+                    {/* Overlay de guía */}
+                    <div className="absolute inset-0 border-4 border-white/30 rounded-2xl pointer-events-none">
+                      <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-32 h-32 border-2 border-white/50 rounded-full"></div>
+                    </div>
+                  </>
+                )}
               </div>
             )}
           </div>
@@ -252,11 +383,25 @@ export default function CameraSetup({ onStartRecording, onBack }: CameraSetupPro
             className="w-full bg-gradient-to-r from-red-500 to-pink-500 hover:from-red-600 hover:to-pink-600 text-white font-bold py-4 px-8 rounded-2xl text-xl shadow-2xl transform transition-all duration-300 hover:scale-105 focus:outline-none focus:ring-4 focus:ring-red-500/50 active:scale-95"
           >
             <span className="flex items-center justify-center gap-3">
-              <span>Iniciar Grabación</span>
-              <span className="text-2xl">🎬</span>
+              <span>
+                {selectedVideoFile ? 'Procesar Video' : 'Iniciar Grabación'}
+              </span>
+              <span className="text-2xl">
+                {selectedVideoFile ? '⚡' : '🎬'}
+              </span>
             </span>
           </button>
         )}
+
+        {/* Input file oculto */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="video/*"
+          capture="environment"
+          style={{ display: 'none' }}
+          onChange={handleVideoFileSelect}
+        />
       </div>
 
       <style jsx>{`
