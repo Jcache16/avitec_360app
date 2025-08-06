@@ -18,12 +18,41 @@ interface StyleSelectionProps {
   onBack: () => void;
 }
 
-// Opciones disponibles
-const MUSIC_OPTIONS = [
-  { id: "none", name: "Sin música", preview: null },
-  { id: "beggin", name: "Beggin - Maneskin", preview: "/music/beggin.mp3" },
-  { id: "master_puppets", name: "Master of Puppets - Metallica", preview: "/music/master_puppets.mp3" },
-  { id: "night_dancer", name: "Night Dancer - Imase", preview: "/music/night_dancer.mp3" },
+// Interfaces para las opciones del backend
+interface MusicOption {
+  id: string;
+  name: string;
+  file?: string;
+  preview?: string;
+}
+
+interface BackendOptions {
+  music: MusicOption[];
+  fonts: FontOption[];
+  frames: FrameOption[];
+  colors: string[];
+}
+
+interface FontOption {
+  id: string;
+  name: string;
+  file: string;
+}
+
+interface FrameOption {
+  id: string;
+  name: string;
+}
+
+// Opciones por defecto (fallback si falla la carga del backend)
+const DEFAULT_MUSIC_OPTIONS: MusicOption[] = [
+  { id: "none", name: "Sin música", preview: undefined },
+  { id: "sigue_bailandome", name: "Sigue Bailandome - Yannc", preview: "/music/SigueBailandome_Yannc.mp3" },
+  { id: "feel_so_close", name: "Feel So Close - Calvin Harris", preview: "/music/FeelSoClose_CalvinHarris.mp3" },
+  { id: "crazy_inLove", name: "Crazy In Love - Beyoncé", preview: "/music/CrazyInLove_Beyonce.mp3" },
+  { id: "extasis_CSanta", name: "Extasis - C. Santa", preview: "/music/Extasis_CSanta.mp3" },
+  { id: "blinding_Lights", name: "Blinding Lights - The Weeknd", preview: "/music/BlindingLights_TheWeeknd.mp3" },
+  { id: "dontStop_theParty", name: "Don't Stop the Party - Pitbull", preview: "/music/DontStoptheParty_Pitbull.mp3" },
 ];
 
 const FRAME_OPTIONS = [
@@ -67,6 +96,45 @@ export default function StyleSelection({ onContinue, onBack }: StyleSelectionPro
   const [isPlayingPreview, setIsPlayingPreview] = useState<string | null>(null);
   const [currentAudio, setCurrentAudio] = useState<HTMLAudioElement | null>(null);
   
+  // Estado para opciones dinámicas del backend
+  const [musicOptions, setMusicOptions] = useState<MusicOption[]>(DEFAULT_MUSIC_OPTIONS);
+  const [isLoadingOptions, setIsLoadingOptions] = useState<boolean>(true);
+
+  // Cargar opciones del backend al montar el componente
+  useEffect(() => {
+    const loadBackendOptions = async () => {
+      try {
+        console.log('🔄 Cargando opciones del backend...');
+        const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3001';
+        const response = await fetch(`${backendUrl}/options`);
+        
+        if (response.ok) {
+          const backendOptions: BackendOptions = await response.json();
+          console.log('✅ Opciones del backend cargadas:', backendOptions);
+          
+          // Transformar opciones de música del backend al formato del frontend
+          const transformedMusicOptions: MusicOption[] = backendOptions.music.map(music => ({
+            id: music.id,
+            name: music.name,
+            preview: music.id !== "none" && music.file ? `/music/${music.file}` : undefined
+          }));
+          
+          setMusicOptions(transformedMusicOptions);
+          console.log('🎵 Opciones de música actualizadas:', transformedMusicOptions);
+        } else {
+          console.warn('⚠️ Error al cargar opciones del backend, usando opciones por defecto');
+        }
+      } catch (error) {
+        console.error('❌ Error conectando con el backend:', error);
+        console.log('🔄 Usando opciones por defecto');
+      } finally {
+        setIsLoadingOptions(false);
+      }
+    };
+
+    loadBackendOptions();
+  }, []);
+  
 
   const handleMusicPreview = async (musicId: string) => {
     // Detener audio actual si existe
@@ -81,7 +149,7 @@ export default function StyleSelection({ onContinue, onBack }: StyleSelectionPro
       return;
     }
 
-    const musicOption = MUSIC_OPTIONS.find(m => m.id === musicId);
+    const musicOption = musicOptions.find((m: MusicOption) => m.id === musicId);
     if (musicOption?.preview) {
       try {
         const audio = new Audio(musicOption.preview);
@@ -238,15 +306,7 @@ export default function StyleSelection({ onContinue, onBack }: StyleSelectionPro
               </div>
             )}
             
-            {/* Indicador de música */}
-            {selectedMusic !== "none" && (
-              <div className="absolute top-4 left-4 bg-black/50 backdrop-blur-sm px-3 py-1 rounded-full flex items-center gap-2">
-                <span className="text-white text-sm">🎵</span>
-                <span className="text-white text-xs">
-                  {MUSIC_OPTIONS.find(m => m.id === selectedMusic)?.name}
-                </span>
-              </div>
-            )}
+            {/* Indicador de música eliminado para simplicidad del procesamiento */}
           </div>
         </div>
 
@@ -256,9 +316,10 @@ export default function StyleSelection({ onContinue, onBack }: StyleSelectionPro
           <div className="bg-white/10 backdrop-blur-sm rounded-xl p-4">
             <h3 className="text-white font-semibold mb-3 flex items-center gap-2">
               <span>🎵</span> Música de fondo
+              {isLoadingOptions && <span className="text-xs text-white/60">(Cargando...)</span>}
             </h3>
             <div className="grid grid-cols-2 gap-2">
-              {MUSIC_OPTIONS.map((music) => (
+              {musicOptions.map((music: MusicOption) => (
                 <div
                   key={music.id}
                   className={`p-3 rounded-lg text-sm font-medium transition-all cursor-pointer ${

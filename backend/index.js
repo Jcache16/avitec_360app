@@ -52,9 +52,14 @@ const upload = multer({
 // 🎨 Configuración de estilos disponibles
 const MUSIC_OPTIONS = [
   { id: "none", name: "Sin música" },
-  { id: "beggin", name: "Beggin - Maneskin", file: "beggin.mp3" },
-  { id: "master_puppets", name: "Master of Puppets - Metallica", file: "master_puppets.mp3" },
-  { id: "night_dancer", name: "Night Dancer - Imase", file: "night_dancer.mp3" },
+  { id: "sigue_bailandome", name: "Sigue Bailandome - Yannc", file: "SigueBailandome_Yannc.mp3" },
+  { id: "feel_so_close", name: "Feel So Close - Calvin Harris", file: "FeelSoClose_CalvinHarris.mp3" },
+  { id: "crazy_inLove", name: "Crazy In Love - Beyoncé", file: "CrazyInLove_Beyonce.mp3" },
+  { id: "extasis_CSanta", name: "Extasis - C. Santa", file: "Extasis_CSanta.mp3" },
+  { id: "blinding_Lights", name: "Blinding Lights - The Weeknd", file: "BlindingLights_TheWeeknd.mp3" },
+  { id: "dontStop_theParty", name: "Don't Stop the Party - Pitbull", file: "DontStoptheParty_Pitbull.mp3" },
+  // Agregar nuevas canciones aquí:
+  // { id: "nueva_cancion", name: "Nueva Canción - Artista", file: "nueva_cancion.mp3" },
 ];
 
 const FONT_OPTIONS = [
@@ -182,21 +187,80 @@ class VideoProcessor {
     this.log(`🔄 Normalizando video: ${path.basename(inputPath)}`);
     const outputPath = path.join(this.workingDir, 'input.mp4');
     
-    // Normalización MÁS SIMPLE para evitar cuelgues
-    const command = ffmpeg(inputPath)
-      .outputOptions([
-        '-c:v', 'libx264',
-        '-preset', 'veryfast',  // MÁS RÁPIDO que ultrafast
-        '-crf', '35',           // Calidad más baja pero más rápido
-        '-s', '480x854',        // Forzar resolución directamente
-        '-r', '24',             // Frame rate fijo
-        '-an'                   // Sin audio
-      ])
-      .output(outputPath);
+    try {
+      // Detectar orientación del video primero
+      const videoInfo = await this.getVideoInfo(inputPath);
+      const needsRotation = videoInfo.width > videoInfo.height; // Si está en horizontal, necesita rotación
       
-    await this.runCommandWithTimeout(command, 'Normalización');
-    await fs.remove(inputPath);
-    return outputPath;
+      this.log(`📐 Dimensiones originales: ${videoInfo.width}x${videoInfo.height} (${needsRotation ? 'necesita rotación' : 'ya vertical'})`);
+      
+      let videoFilter;
+      if (needsRotation) {
+        // Video horizontal -> rotarlo a vertical y escalar
+        videoFilter = 'transpose=1,scale=480:854:flags=fast_bilinear:force_original_aspect_ratio=decrease,pad=480:854:(ow-iw)/2:(oh-ih)/2';
+      } else {
+        // Video ya vertical -> solo escalar manteniendo aspecto
+        videoFilter = 'scale=480:854:flags=fast_bilinear:force_original_aspect_ratio=decrease,pad=480:854:(ow-iw)/2:(oh-ih)/2';
+      }
+      
+      const command = ffmpeg(inputPath)
+        .outputOptions([
+          '-c:v', 'libx264',
+          '-preset', 'veryfast',  
+          '-crf', '35',           
+          '-vf', videoFilter,
+          '-r', '24',             
+          '-an'                   
+        ])
+        .output(outputPath);
+        
+      await this.runCommandWithTimeout(command, 'Normalización');
+      await fs.remove(inputPath);
+      return outputPath;
+      
+    } catch (error) {
+      this.log(`❌ Error en normalización con detección: ${error.message}`);
+      // Fallback a normalización simple
+      const command = ffmpeg(inputPath)
+        .outputOptions([
+          '-c:v', 'libx264',
+          '-preset', 'veryfast',  
+          '-crf', '35',           
+          '-vf', 'scale=480:854:flags=fast_bilinear:force_original_aspect_ratio=decrease,pad=480:854:(ow-iw)/2:(oh-ih)/2',
+          '-r', '24',             
+          '-an'                   
+        ])
+        .output(outputPath);
+        
+      await this.runCommandWithTimeout(command, 'Normalización Fallback');
+      await fs.remove(inputPath);
+      return outputPath;
+    }
+  }
+
+  // Nueva función helper para obtener información del video
+  async getVideoInfo(videoPath) {
+    return new Promise((resolve, reject) => {
+      ffmpeg.ffprobe(videoPath, (err, metadata) => {
+        if (err) {
+          reject(err);
+          return;
+        }
+        
+        const videoStream = metadata.streams.find(stream => stream.codec_type === 'video');
+        if (!videoStream) {
+          reject(new Error('No se encontró stream de video'));
+          return;
+        }
+        
+        resolve({
+          width: videoStream.width,
+          height: videoStream.height,
+          duration: videoStream.duration,
+          fps: eval(videoStream.r_frame_rate) // Convertir fracción a decimal
+        });
+      });
+    });
   }
   
   async createSpeedEffectSegments(inputVideoPath, normalDuration, slowmoDuration) {
@@ -322,9 +386,10 @@ class OverlayGenerator {
     if (styleConfig.text && styleConfig.text.trim()) {
       await this.drawText(ctx, width, height, styleConfig);
     }
-    if (styleConfig.music && styleConfig.music !== 'none') {
-      await this.drawMusicIndicator(ctx, width, height, styleConfig);
-    }
+    // Indicador de música eliminado para reducir procesamiento
+    // if (styleConfig.music && styleConfig.music !== 'none') {
+    //   await this.drawMusicIndicator(ctx, width, height, styleConfig);
+    // }
     return canvas.toBuffer('image/png');
   }
 
@@ -358,6 +423,11 @@ class OverlayGenerator {
   }
 
   static async drawMusicIndicator(ctx, width, height, styleConfig) {
+    // Función deshabilitada para reducir procesamiento
+    // El indicador de música ya no se muestra en el video
+    return;
+    
+    /*
     const musicOption = MUSIC_OPTIONS.find(m => m.id === styleConfig.music);
     if (!musicOption) return;
     const size = 40;
@@ -370,6 +440,7 @@ class OverlayGenerator {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText('♪', x + size / 2, y + size / 2);
+    */
   }
 }
 

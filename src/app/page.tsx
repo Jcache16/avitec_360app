@@ -190,11 +190,8 @@ function WelcomeScreen({ onStartExperience }: { onStartExperience: () => void })
             </div>
           </div>
           <h1 className="text-3xl font-bold text-white mb-2 tracking-tight">
-            360° Studio
+            AVI TEC 360° Studio
           </h1>
-          <p className="text-purple-200 text-sm font-medium">
-            Powered by AVI TEC
-          </p>
         </div>
 
         {/* Mensaje principal */}
@@ -240,11 +237,18 @@ function WelcomeScreen({ onStartExperience }: { onStartExperience: () => void })
         </p>
       </div>
 
-      {/* Indicador de scroll (opcional) */}
-      <div className="absolute bottom-8 left-1/2 transform -translate-x-1/2">
-        <div className="w-6 h-10 border-2 border-white/30 rounded-full flex justify-center">
-          <div className="w-1 h-3 bg-white/60 rounded-full mt-2 animate-bounce"></div>
-        </div>
+      {/* Footer inferior - Movido fuera del contenido principal */}
+      <div className="absolute bottom-4 left-0 right-0 text-center text-xs text-purple-200/80 z-20 px-4">
+        © {new Date().getFullYear()} AVI TEC. Todos los derechos reservados - Página desarrollada por{' '}
+        <a
+          href="https://sparksolutions.dev"
+          className="underline text-purple-200/80 hover:text-purple-100 transition-colors cursor-pointer"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          Spark Solutions
+        </a>
+        .
       </div>
     </div>
   );
