@@ -105,42 +105,11 @@ export async function generateOverlayPNG(
         canvas.add(textObj);
       }
 
-      // --- Nombre de la canción ---
+      // --- INDICADOR DE MÚSICA REMOVIDO ---
+      // El indicador de música ya no se muestra en el overlay para reducir elementos visuales
+      // La información de música se maneja solo a nivel de audio en el video final
       if (config.music && config.music !== "none") {
-        console.log('🎵 Agregando indicador de música:', config.music);
-        
-        // CORREGIDO: Proporciones ajustadas para 480x854
-        const musicRect = new Rect({
-          left: 24, top: 24,      // Reducido de 36,32 a 24,24
-          width: 240, height: 36, // Reducido de 360,54 a 240,36
-          fill: "rgba(255,255,255,0.95)", 
-          rx: 8, ry: 8,           // Reducido de 12 a 8
-          selectable: false,
-          shadow: new Shadow({
-            color: "rgba(0,0,0,0.3)",
-            blur: 6,              // Reducido de 8 a 6
-            offsetX: 0,
-            offsetY: 3            // Reducido de 4 a 3
-          })
-        });
-        canvas.add(musicRect);
-
-        const name = config.music
-          .replace(/_/g, " ")
-          .replace(/\b\w/g, (l) => l.toUpperCase());
-          
-        const musicText = new Text("🎵 " + name, {
-          left: 36,               // Reducido de 56 a 36
-          top: 42,                // Reducido de 59 a 42
-          fontFamily: "sans-serif",
-          fontSize: 16,           // Reducido de 24 a 16
-          fontWeight: "600",
-          fill: "#6C63FF",
-          originX: "left",
-          originY: "center",
-          selectable: false
-        });
-        canvas.add(musicText);
+        console.log('🎵 Música seleccionada (sin mostrar en overlay):', config.music);
       }
 
       console.log('🔄 Renderizando canvas...');

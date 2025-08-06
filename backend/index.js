@@ -1,7 +1,7 @@
 /**
  * 🎬 AVITEC 360 BACKEND - PROCESAMIENTO DE VIDEOS
  * 
- * Versión 1.3.1 - Implementación de timeout robusto para ffmpeg (versión completa)
+ * Versión 1.3.2 - Correcciones para móviles + eliminación de duplicación de overlays
  */
 
 const express = require('express');
@@ -74,7 +74,7 @@ class VideoProcessor {
     this.processingId = processingId || 'no-id';
     this.workingDir = path.join(__dirname, 'temp', uuidv4());
     this.outputDir = path.join(__dirname, 'processed');
-    this.ffmpegTimeout = 60 * 1000; // 60 segundos timeout MÁS AGRESIVO
+    this.ffmpegTimeout = 120 * 1000; // 120 segundos timeout para videos móviles complejos
   }
 
   log(message) {
@@ -85,6 +85,7 @@ class VideoProcessor {
     return new Promise((resolve, reject) => {
       let timeoutId;
       let processKilled = false;
+      let commandProcess = null;
 
       command
         .on('start', (commandLine) => {
@@ -94,45 +95,79 @@ class VideoProcessor {
             processKilled = true;
             this.log(`[${commandName}] ⏰ TIMEOUT - Matando proceso después de ${this.ffmpegTimeout / 1000}s`);
             
-            // Intentar kill suave primero
-            try {
-              command.kill('SIGTERM');
-              setTimeout(() => {
-                // Si no murió, kill forzado
-                try {
-                  command.kill('SIGKILL');
-                  this.log(`[${commandName}] 💀 Proceso forzadamente terminado`);
-                } catch (killError) {
-                  this.log(`[${commandName}] ❌ Error en kill forzado: ${killError.message}`);
+            // Intentar obtener el proceso si está disponible
+            if (commandProcess) {
+              try {
+                // Kill más agresivo para Windows
+                if (process.platform === 'win32') {
+                  // En Windows usar taskkill para matar el árbol de procesos
+                  const { spawn } = require('child_process');
+                  spawn('taskkill', ['/pid', commandProcess.pid, '/t', '/f'], { stdio: 'ignore' });
+                } else {
+                  // En Unix usar kill normal
+                  process.kill(commandProcess.pid, 'SIGKILL');
                 }
-              }, 2000); // 2 segundos para kill suave
-            } catch (killError) {
-              this.log(`[${commandName}] ❌ Error en kill suave: ${killError.message}`);
+                this.log(`[${commandName}] 💀 Proceso terminado forzadamente (PID: ${commandProcess.pid})`);
+              } catch (killError) {
+                this.log(`[${commandName}] ❌ Error en kill: ${killError.message}`);
+              }
+            } else {
+              // Fallback: intentar kill a través de fluent-ffmpeg
+              try {
+                command.kill('SIGTERM');
+                setTimeout(() => {
+                  try {
+                    command.kill('SIGKILL');
+                  } catch (killError) {
+                    this.log(`[${commandName}] ❌ Error en kill forzado: ${killError.message}`);
+                  }
+                }, 2000);
+              } catch (killError) {
+                this.log(`[${commandName}] ❌ Error en kill suave: ${killError.message}`);
+              }
             }
             
-            reject(new Error(`[${commandName}] TIMEOUT: El proceso tardó más de ${this.ffmpegTimeout / 1000} segundos.`));
+            reject(new Error(`[${commandName}] TIMEOUT: El proceso tardó más de ${this.ffmpegTimeout / 1000} segundos. Proceso: ${processKilled ? 'terminado' : 'no terminado'}`));
           }, this.ffmpegTimeout);
         })
         .on('progress', (progress) => {
-          if (progress.percent) {
+          if (progress.percent && !isNaN(progress.percent)) {
             this.log(`[${commandName}] 📊 Progreso: ${Math.floor(progress.percent)}%`);
+          } else if (progress.frames) {
+            this.log(`[${commandName}] 🔄 Procesando... Frames: ${progress.frames}`);
           } else {
             this.log(`[${commandName}] 🔄 Procesando...`);
           }
         })
         .on('end', (stdout, stderr) => {
           clearTimeout(timeoutId);
-          this.log(`[${commandName}] ✅ Proceso completado.`);
+          if (processKilled) {
+            this.log(`[${commandName}] ⚠️ Proceso completado después del timeout`);
+            return; // No resolver si ya se rechazó por timeout
+          }
+          this.log(`[${commandName}] ✅ Proceso completado exitosamente.`);
           resolve();
         })
         .on('error', (err, stdout, stderr) => {
           clearTimeout(timeoutId);
-          if (processKilled) return;
+          if (processKilled) {
+            this.log(`[${commandName}] ⚠️ Error recibido después del timeout`);
+            return; // No rechazar de nuevo si ya se rechazó por timeout
+          }
           
           this.log(`[${commandName}] ❌ Error en el proceso: ${err.message}`);
-          if (stderr) console.error(`[${commandName}] stderr:\n`, stderr);
+          if (stderr) {
+            this.log(`[${commandName}] stderr: ${stderr.substring(0, 500)}...`); // Limitar stderr log
+          }
           reject(new Error(`[${commandName}] Error: ${err.message}`));
         });
+
+      // Intentar capturar la referencia del proceso cuando sea posible
+      try {
+        commandProcess = command.ffmpegProc;
+      } catch (e) {
+        // No siempre está disponible, no es crítico
+      }
 
       command.run();
     });
@@ -149,6 +184,12 @@ class VideoProcessor {
     this.log('🎬 Iniciando procesamiento...');
     
     try {
+      // Validar archivo de video antes del procesamiento
+      const isValidVideo = await this.validateVideoFile(videoPath);
+      if (!isValidVideo) {
+        throw new Error('Archivo de video inválido o corrupto');
+      }
+      
       const originalInput = path.join(this.workingDir, `original-input${path.extname(videoPath)}`);
       await fs.copy(videoPath, originalInput);
 
@@ -183,34 +224,131 @@ class VideoProcessor {
     }
   }
 
+  // Nueva función para validar archivos de video
+  async validateVideoFile(videoPath) {
+    this.log(`🔍 Validando archivo de video: ${path.basename(videoPath)}`);
+    
+    try {
+      // Verificar que el archivo existe y tiene tamaño > 0
+      const stats = await fs.stat(videoPath);
+      if (stats.size === 0) {
+        this.log('❌ Archivo de video vacío');
+        return false;
+      }
+      
+      if (stats.size < 1024) { // Menos de 1KB es sospechoso
+        this.log('❌ Archivo de video demasiado pequeño');
+        return false;
+      }
+      
+      this.log(`📊 Tamaño del archivo: ${(stats.size / 1024 / 1024).toFixed(2)} MB`);
+      
+      // Intentar leer información básica del video
+      try {
+        const videoInfo = await this.getVideoInfo(videoPath);
+        
+        // Validaciones básicas
+        if (!videoInfo.width || !videoInfo.height || videoInfo.width < 10 || videoInfo.height < 10) {
+          this.log('❌ Dimensiones de video inválidas');
+          return false;
+        }
+        
+        if (!videoInfo.duration || videoInfo.duration < 0.1) {
+          this.log('❌ Duración de video inválida');
+          return false;
+        }
+        
+        this.log(`✅ Video válido: ${videoInfo.width}x${videoInfo.height}, ${videoInfo.duration.toFixed(2)}s`);
+        return true;
+        
+      } catch (infoError) {
+        this.log(`❌ Error leyendo información del video: ${infoError.message}`);
+        return false;
+      }
+      
+    } catch (statError) {
+      this.log(`❌ Error accediendo al archivo: ${statError.message}`);
+      return false;
+    }
+  }
+
   async normalizeInputVideo(inputPath) {
     this.log(`🔄 Normalizando video: ${path.basename(inputPath)}`);
     const outputPath = path.join(this.workingDir, 'input.mp4');
     
     try {
-      // Detectar orientación del video primero
-      const videoInfo = await this.getVideoInfo(inputPath);
-      const needsRotation = videoInfo.width > videoInfo.height; // Si está en horizontal, necesita rotación
-      
-      this.log(`📐 Dimensiones originales: ${videoInfo.width}x${videoInfo.height} (${needsRotation ? 'necesita rotación' : 'ya vertical'})`);
-      
-      let videoFilter;
-      if (needsRotation) {
-        // Video horizontal -> rotarlo a vertical y escalar
-        videoFilter = 'transpose=1,scale=480:854:flags=fast_bilinear:force_original_aspect_ratio=decrease,pad=480:854:(ow-iw)/2:(oh-ih)/2';
-      } else {
-        // Video ya vertical -> solo escalar manteniendo aspecto
-        videoFilter = 'scale=480:854:flags=fast_bilinear:force_original_aspect_ratio=decrease,pad=480:854:(ow-iw)/2:(oh-ih)/2';
+      // Detectar orientación del video primero con manejo de errores
+      let videoInfo;
+      try {
+        videoInfo = await this.getVideoInfo(inputPath);
+      } catch (infoError) {
+        this.log(`⚠️ No se pudo obtener info del video: ${infoError.message}`);
+        // Usar valores por defecto para continuar
+        videoInfo = {
+          width: 480,
+          height: 854,
+          rotation: 0,
+          fps: 24,
+          codec: 'unknown',
+          pixelFormat: 'yuv420p',
+          hasAudio: false
+        };
       }
       
+      this.log(`📐 Dimensiones originales: ${videoInfo.width}x${videoInfo.height}`);
+      this.log(`🔄 Rotación metadata: ${videoInfo.rotation}°`);
+      this.log(`📹 Codec: ${videoInfo.codec} | Pixel Format: ${videoInfo.pixelFormat} | Audio: ${videoInfo.hasAudio ? 'Sí' : 'No'}`);
+      
+      // ESTRATEGIA SIMPLIFICADA PARA MÓVILES PROBLEMÁTICOS
+      let videoFilter;
+      let needsRotation = false;
+      
+      // Determinar estrategia basada en dimensiones actuales y rotación
+      if (videoInfo.rotation === 90 || videoInfo.rotation === 270) {
+        this.log(`🎯 Video con rotación metadata ${videoInfo.rotation}° - aplicando corrección`);
+        needsRotation = true;
+        
+        if (videoInfo.rotation === 90) {
+          videoFilter = 'transpose=1'; // 90° horario
+        } else {
+          videoFilter = 'transpose=2'; // 90° antihorario
+        }
+        
+      } else if (videoInfo.width > videoInfo.height && videoInfo.rotation === 0) {
+        // Video horizontal real - necesita rotación
+        this.log(`🎯 Video horizontal (${videoInfo.width}x${videoInfo.height}) - rotando a vertical`);
+        needsRotation = true;
+        videoFilter = 'transpose=1';
+        
+      } else {
+        // Video ya en orientación correcta o incierto
+        this.log(`🎯 Video orientación OK (${videoInfo.width}x${videoInfo.height}) - solo escalado`);
+        needsRotation = false;
+      }
+      
+      // Aplicar escalado después de rotación si es necesaria
+      const scaleFilter = 'scale=480:854:flags=lanczos:force_original_aspect_ratio=decrease,pad=480:854:(ow-iw)/2:(oh-ih)/2:color=black';
+      
+      if (needsRotation) {
+        videoFilter += ',' + scaleFilter;
+      } else {
+        videoFilter = scaleFilter;
+      }
+      
+      this.log(`🔧 Filtro aplicado: ${videoFilter}`);
+      
+      // Comando optimizado para móviles
       const command = ffmpeg(inputPath)
         .outputOptions([
           '-c:v', 'libx264',
-          '-preset', 'veryfast',  
-          '-crf', '35',           
+          '-preset', 'fast',      // Balance entre velocidad y calidad
+          '-crf', '30',           // Calidad ajustada para móviles
           '-vf', videoFilter,
-          '-r', '24',             
-          '-an'                   
+          '-r', '24',             // Frame rate fijo
+          '-an',                  // Sin audio en normalización
+          '-movflags', '+faststart',
+          '-metadata:s:v:0', 'rotate=0', // Limpiar metadata de rotación
+          '-avoid_negative_ts', 'make_zero' // Evitar timestamps negativos
         ])
         .output(outputPath);
         
@@ -219,30 +357,66 @@ class VideoProcessor {
       return outputPath;
       
     } catch (error) {
-      this.log(`❌ Error en normalización con detección: ${error.message}`);
-      // Fallback a normalización simple
-      const command = ffmpeg(inputPath)
-        .outputOptions([
-          '-c:v', 'libx264',
-          '-preset', 'veryfast',  
-          '-crf', '35',           
-          '-vf', 'scale=480:854:flags=fast_bilinear:force_original_aspect_ratio=decrease,pad=480:854:(ow-iw)/2:(oh-ih)/2',
-          '-r', '24',             
-          '-an'                   
-        ])
-        .output(outputPath);
+      this.log(`❌ Error en normalización inteligente: ${error.message}`);
+      // Fallback: Usar autorotate de FFmpeg + escalado (SINTAXIS CORREGIDA)
+      this.log(`🔄 Usando fallback con autorotate`);
+      
+      try {
+        const command = ffmpeg(inputPath)
+          .inputOptions(['-autorotate', '1'])  // CORREGIDO: Mover autorotate a inputOptions
+          .outputOptions([
+            '-c:v', 'libx264',
+            '-preset', 'fast',  // Cambiado de veryfast a fast para mejor compatibilidad
+            '-crf', '32',       // Ajustado para balance calidad/velocidad
+            '-vf', 'scale=480:854:flags=lanczos:force_original_aspect_ratio=decrease,pad=480:854:(ow-iw)/2:(oh-ih)/2:color=black',
+            '-r', '24',             
+            '-an',
+            '-movflags', '+faststart',
+            '-metadata:s:v:0', 'rotate=0' // Limpiar metadata de rotación
+          ])
+          .output(outputPath);
+          
+        await this.runCommandWithTimeout(command, 'Normalización Fallback');
+        await fs.remove(inputPath);
+        return outputPath;
         
-      await this.runCommandWithTimeout(command, 'Normalización Fallback');
-      await fs.remove(inputPath);
-      return outputPath;
+      } catch (fallbackError) {
+        this.log(`❌ Fallback también falló: ${fallbackError.message}`);
+        // Último recurso: Solo escalado básico sin autorotate
+        this.log(`🔄 Último recurso: escalado básico sin rotación`);
+        
+        const basicCommand = ffmpeg(inputPath)
+          .outputOptions([
+            '-c:v', 'libx264',
+            '-preset', 'fast',
+            '-crf', '28',
+            '-vf', 'scale=480:854:force_original_aspect_ratio=decrease,pad=480:854:(ow-iw)/2:(oh-ih)/2:color=black',
+            '-r', '24',
+            '-an',
+            '-movflags', '+faststart'
+          ])
+          .output(outputPath);
+          
+        await this.runCommandWithTimeout(basicCommand, 'Escalado Básico');
+        await fs.remove(inputPath);
+        return outputPath;
+      }
     }
   }
 
-  // Nueva función helper para obtener información del video
+  // Función profesional para obtener información completa del video
   async getVideoInfo(videoPath) {
     return new Promise((resolve, reject) => {
+      // Timeout para ffprobe también
+      const probeTimeout = setTimeout(() => {
+        reject(new Error('Timeout en ffprobe - archivo posiblemente corrupto'));
+      }, 30000); // 30 segundos para probe
+      
       ffmpeg.ffprobe(videoPath, (err, metadata) => {
+        clearTimeout(probeTimeout);
+        
         if (err) {
+          this.log(`❌ Error en ffprobe: ${err.message}`);
           reject(err);
           return;
         }
@@ -253,12 +427,83 @@ class VideoProcessor {
           return;
         }
         
-        resolve({
-          width: videoStream.width,
-          height: videoStream.height,
-          duration: videoStream.duration,
-          fps: eval(videoStream.r_frame_rate) // Convertir fracción a decimal
-        });
+        // DETECCIÓN PROFESIONAL DE ROTACIÓN CON MANEJO DE ERRORES
+        let rotation = 0;
+        
+        try {
+          // Método 1: Tags de rotación directos
+          if (videoStream.tags) {
+            if (videoStream.tags.rotate) {
+              rotation = parseInt(videoStream.tags.rotate) || 0;
+            } else if (videoStream.tags.rotation) {
+              rotation = parseInt(videoStream.tags.rotation) || 0;
+            }
+          }
+          
+          // Método 2: Side data (Display Matrix) - más preciso para iOS
+          if (videoStream.side_data_list && rotation === 0) {
+            const displayMatrix = videoStream.side_data_list.find(sd => 
+              sd.side_data_type === 'Display Matrix' || sd.side_data_type === 'Displaymatrix'
+            );
+            
+            if (displayMatrix) {
+              if (displayMatrix.rotation !== undefined) {
+                rotation = Math.abs(parseInt(displayMatrix.rotation) || 0);
+              } else if (displayMatrix.displaymatrix && typeof displayMatrix.displaymatrix === 'string') {
+                // Parsear matrix manualmente si es necesario
+                const matrix = displayMatrix.displaymatrix;
+                if (matrix.includes('90')) rotation = 90;
+                else if (matrix.includes('180')) rotation = 180;  
+                else if (matrix.includes('270')) rotation = 270;
+              }
+            }
+          }
+          
+          // Método 3: Metadata general del container
+          if (metadata.format && metadata.format.tags && rotation === 0) {
+            if (metadata.format.tags.rotate) {
+              rotation = parseInt(metadata.format.tags.rotate) || 0;
+            }
+          }
+          
+        } catch (rotationError) {
+          this.log(`⚠️ Error detectando rotación: ${rotationError.message}, usando 0°`);
+          rotation = 0;
+        }
+        
+        // Normalizar valores de rotación
+        rotation = rotation % 360;
+        if (rotation < 0) rotation += 360;
+        
+        // Manejo seguro de frame rate
+        let fps = 24; // Default fallback
+        try {
+          if (videoStream.r_frame_rate) {
+            fps = eval(videoStream.r_frame_rate) || 24; // Convertir fracción a decimal
+          } else if (videoStream.avg_frame_rate) {
+            fps = eval(videoStream.avg_frame_rate) || 24;
+          }
+          // Sanitizar fps extremos
+          if (fps > 60 || fps < 1) fps = 24;
+        } catch (fpsError) {
+          this.log(`⚠️ Error detectando FPS: ${fpsError.message}, usando 24fps`);
+        }
+        
+        const result = {
+          width: videoStream.width || 480,
+          height: videoStream.height || 854,
+          duration: parseFloat(videoStream.duration) || 10,
+          fps: fps,
+          rotation: rotation,
+          codec: videoStream.codec_name || 'unknown',
+          pixelFormat: videoStream.pix_fmt || 'yuv420p',
+          // Información adicional para debugging
+          hasAudio: metadata.streams.some(s => s.codec_type === 'audio'),
+          containerFormat: metadata.format ? metadata.format.format_name : 'unknown'
+        };
+        
+        this.log(`📊 Video Info: ${result.width}x${result.height}, ${result.fps}fps, rot:${result.rotation}°, codec:${result.codec}, format:${result.containerFormat}`);
+        resolve(result);
       });
     });
   }
@@ -445,44 +690,72 @@ class OverlayGenerator {
 }
 
 // 🚀 RUTAS DE LA API
-app.get('/', (req, res) => res.json({ status: 'active', version: '1.3.1' }));
+app.get('/', (req, res) => res.json({ status: 'active', version: '1.3.2' }));
 
 app.post('/process-video', upload.fields([{ name: 'video', maxCount: 1 }, { name: 'overlay', maxCount: 1 }]), async (req, res) => {
   const processingId = uuidv4();
   console.log(`[${processingId}] 📥 Petición POST /process-video recibida.`);
+  console.log(`[${processingId}] 🔍 User-Agent: ${req.headers['user-agent'] || 'unknown'}`);
 
   try {
     if (!req.files || !req.files.video || !req.files.video[0]) {
-      return res.status(400).json({ error: 'Video requerido' });
+      return res.status(400).json({ error: 'Video requerido', processingId });
     }
 
     const videoFile = req.files.video[0];
+    console.log(`[${processingId}] 📁 Video recibido: ${videoFile.originalname} (${(videoFile.size / 1024 / 1024).toFixed(2)} MB)`);
+    console.log(`[${processingId}] 📝 Mimetype: ${videoFile.mimetype}`);
+    
     const styleConfig = JSON.parse(req.body.styleConfig || '{}');
     const normalDuration = parseFloat(req.body.normalDuration) || 5;
     const slowmoDuration = parseFloat(req.body.slowmoDuration) || 5;
+    
+    console.log(`[${processingId}] ⚙️ Configuración: Normal=${normalDuration}s, Slowmo=${slowmoDuration}s, Música=${styleConfig.music || 'none'}`);
 
     let overlayPath;
     if (req.files.overlay && req.files.overlay[0]) {
+      // USAR OVERLAY DEL FRONTEND (corregido)
       overlayPath = req.files.overlay[0].path;
+      console.log(`[${processingId}] 🎨 Usando overlay del frontend: ${(req.files.overlay[0].size / 1024).toFixed(2)} KB`);
     } else {
-      const overlayBuffer = await OverlayGenerator.generateOverlayPNG(styleConfig);
-      overlayPath = path.join(__dirname, 'uploads', `overlay-${processingId}.png`);
-      await fs.writeFile(overlayPath, overlayBuffer);
+      // SOLO generar overlay si NO viene del frontend
+      console.log(`[${processingId}] ⚠️ No se recibió overlay del frontend, generando en backend (fallback)`);
+      try {
+        const overlayBuffer = await OverlayGenerator.generateOverlayPNG(styleConfig);
+        overlayPath = path.join(__dirname, 'uploads', `overlay-${processingId}.png`);
+        await fs.writeFile(overlayPath, overlayBuffer);
+        console.log(`[${processingId}] 🎨 Overlay generado en backend como fallback`);
+      } catch (overlayError) {
+        console.error(`[${processingId}] ❌ Error generando overlay en backend: ${overlayError.message}`);
+        return res.status(500).json({ 
+          error: 'Error generando overlay', 
+          message: overlayError.message, 
+          processingId 
+        });
+      }
     }
 
     const processor = new VideoProcessor(processingId);
     await processor.initialize();
     
+    console.log(`[${processingId}] 🚀 Iniciando procesamiento de video...`);
     const outputPath = await processor.processWithStyles(videoFile.path, overlayPath, styleConfig, normalDuration, slowmoDuration);
 
     console.log(`[${processingId}] ✅ Procesamiento completado. Enviando archivo: ${path.basename(outputPath)}`);
     
     res.download(outputPath, `video-360-${processingId}.mp4`, async (err) => {
-      if (err) console.error(`[${processingId}] ❌ Error enviando archivo:`, err);
+      if (err) {
+        console.error(`[${processingId}] ❌ Error enviando archivo:`, err);
+      } else {
+        console.log(`[${processingId}] 📤 Archivo enviado exitosamente`);
+      }
+      
+      // Limpieza de archivos
       try {
-        await fs.remove(videoFile.path);
-        await fs.remove(overlayPath);
-        await fs.remove(outputPath);
+        if (await fs.pathExists(videoFile.path)) await fs.remove(videoFile.path);
+        if (await fs.pathExists(overlayPath)) await fs.remove(overlayPath);
+        if (await fs.pathExists(outputPath)) await fs.remove(outputPath);
+        console.log(`[${processingId}] 🧹 Archivos limpiados`);
       } catch (cleanupError) {
         console.error(`[${processingId}] ❌ Error limpiando archivos post-envío:`, cleanupError);
       }
@@ -490,7 +763,31 @@ app.post('/process-video', upload.fields([{ name: 'video', maxCount: 1 }, { name
 
   } catch (error) {
     console.error(`[${processingId}] ❌ Error fatal en la ruta /process-video:`, error);
-    res.status(500).json({ error: 'Error procesando video', message: error.message, processingId });
+    
+    // Determinar tipo de error para mejor respuesta
+    let statusCode = 500;
+    let errorMessage = 'Error procesando video';
+    
+    if (error.message.includes('TIMEOUT')) {
+      statusCode = 408;
+      errorMessage = 'El procesamiento del video tardó demasiado tiempo. Intente con un video más corto o de menor calidad.';
+    } else if (error.message.includes('inválido') || error.message.includes('corrupto')) {
+      statusCode = 400;
+      errorMessage = 'El archivo de video no es válido o está corrupto. Intente con otro archivo.';
+    } else if (error.message.includes('ENOENT') || error.message.includes('no such file')) {
+      statusCode = 400;
+      errorMessage = 'Archivo de video no encontrado o inaccesible.';
+    } else if (error.message.includes('memory') || error.message.includes('ENOMEM')) {
+      statusCode = 507;
+      errorMessage = 'Memoria insuficiente para procesar el video. Intente con un video más pequeño.';
+    }
+    
+    res.status(statusCode).json({ 
+      error: errorMessage, 
+      technicalError: error.message, 
+      processingId,
+      timestamp: new Date().toISOString()
+    });
   }
 });
 

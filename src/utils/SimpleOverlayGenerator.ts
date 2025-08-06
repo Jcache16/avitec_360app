@@ -106,40 +106,11 @@ export async function generateSimpleOverlayPNG(
         ctx.shadowOffsetY = 0;
       }
       
-      // --- Nombre de la canción ---
+      // --- INDICADOR DE MÚSICA REMOVIDO ---
+      // El indicador de música ya no se muestra en el overlay para limpiar la interfaz visual
+      // La música se aplica solo como audio en el video final
       if (config.music && config.music !== "none") {
-        console.log('🎵 Dibujando indicador de música:', config.music);
-        
-        // Fondo del indicador de música
-        ctx.fillStyle = "rgba(255,255,255,0.95)";
-        drawRoundedRect(ctx, 36, 32, 360, 54, 12);
-        ctx.fill();
-        
-        // Sombra sutil
-        ctx.shadowColor = 'rgba(0,0,0,0.3)';
-        ctx.shadowBlur = 8;
-        ctx.shadowOffsetY = 4;
-        
-        // Redibuja el fondo con sombra
-        ctx.fillStyle = "rgba(255,255,255,0.95)";
-        drawRoundedRect(ctx, 36, 32, 360, 54, 12);
-        ctx.fill();
-        
-        // Resetear sombra
-        ctx.shadowColor = 'transparent';
-        ctx.shadowBlur = 0;
-        ctx.shadowOffsetY = 0;
-        
-        // Texto de la música
-        const name = config.music
-          .replace(/_/g, " ")
-          .replace(/\b\w/g, (l) => l.toUpperCase());
-          
-        ctx.font = "600 24px sans-serif";
-        ctx.fillStyle = "#6C63FF";
-        ctx.textAlign = 'left';
-        ctx.textBaseline = 'middle';
-        ctx.fillText("🎵 " + name, 56, 59);
+        console.log('🎵 Música seleccionada (sin mostrar en overlay):', config.music);
       }
       
       console.log('🔄 Convirtiendo canvas a blob...');
