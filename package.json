@@ -14,6 +14,7 @@
     "@types/fabric": "^5.3.10",
     "fabric": "^6.7.1",
     "next": "15.4.5",
+    "qrcode.react": "^4.1.0",
     "react": "19.1.0",
     "react-dom": "19.1.0"
   },
@@ -21,6 +22,7 @@
     "@eslint/eslintrc": "^3",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
+    "@types/qrcode.react": "^1.0.5",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",

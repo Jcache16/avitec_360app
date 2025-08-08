@@ -126,7 +126,7 @@ export default function StyleSelection({ onContinue, onBack }: StyleSelectionPro
           throw new Error(`Error obteniendo opciones: ${optionsResult.message}`);
         }
 
-        const backendOptions: BackendOptions = optionsResult.data;
+        const backendOptions = optionsResult.data as BackendOptions;
         console.log('✅ Opciones del backend cargadas:', backendOptions);
         
         // Transformar opciones de música del backend al formato del frontend
@@ -172,7 +172,7 @@ export default function StyleSelection({ onContinue, onBack }: StyleSelectionPro
           throw new Error(`Error obteniendo opciones: ${optionsResult.message}`);
         }
 
-        const backendOptions: BackendOptions = optionsResult.data;
+        const backendOptions = optionsResult.data as BackendOptions;
         const transformedMusicOptions: MusicOption[] = backendOptions.music.map(music => ({
           id: music.id,
           name: music.name,

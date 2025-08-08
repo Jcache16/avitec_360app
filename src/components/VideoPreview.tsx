@@ -10,7 +10,6 @@
 import { useState, useEffect, useRef } from "react";
 import { StyleConfig, ProcessingProgress } from "@/utils/VideoProcessor";
 import { processVideoHybrid } from "@/utils/BackendService";
-// @ts-ignore
 import { QRCodeSVG } from 'qrcode.react';
 
 interface VideoPreviewProps {

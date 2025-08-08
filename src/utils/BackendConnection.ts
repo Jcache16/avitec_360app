@@ -5,7 +5,7 @@
 interface BackendTestResult {
   success: boolean;
   message: string;
-  data?: any;
+  data?: unknown;
   error?: string;
 }
 
