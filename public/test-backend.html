@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test de Conexión Backend</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 40px auto;
+            padding: 20px;
+            background: #1a1a2e;
+            color: white;
+        }
+        .container {
+            background: #16213e;
+            padding: 20px;
+            border-radius: 10px;
+            margin: 20px 0;
+        }
+        button {
+            background: #8B5CF6;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background: #7C3AED;
+        }
+        .success { color: #22c55e; }
+        .error { color: #ef4444; }
+        .info { color: #3b82f6; }
+        pre {
+            background: #0a0a0a;
+            padding: 10px;
+            border-radius: 5px;
+            overflow-x: auto;
+            white-space: pre-wrap;
+        }
+    </style>
+</head>
+<body>
+    <h1>🧪 Test de Conexión - Backend Avitec 360</h1>
+    
+    <div class="container">
+        <h3>Configuración</h3>
+        <p><strong>Backend URL:</strong> <span id="backend-url">Cargando...</span></p>
+        <p><strong>Estado:</strong> <span id="status">Inicializando...</span></p>
+    </div>
+
+    <div class="container">
+        <h3>Pruebas de Conectividad</h3>
+        <button onclick="testBasicConnection()">🔌 Test Conexión Básica</button>
+        <button onclick="testOptions()">🎨 Test Endpoint /options</button>
+        <button onclick="testCORS()">🌐 Test CORS</button>
+        <button onclick="clearResults()">🧹 Limpiar</button>
+    </div>
+
+    <div class="container">
+        <h3>Resultados</h3>
+        <div id="results"></div>
+    </div>
+
+    <script>
+        const BACKEND_URL = 'https://avitec360-backend.onrender.com';
+        
+        document.getElementById('backend-url').textContent = BACKEND_URL;
+        document.getElementById('status').textContent = 'Listo para probar';
+
+        function log(message, type = 'info') {
+            const results = document.getElementById('results');
+            const timestamp = new Date().toLocaleTimeString();
+            const logEntry = document.createElement('div');
+            logEntry.className = type;
+            logEntry.innerHTML = `<strong>[${timestamp}]</strong> ${message}`;
+            results.appendChild(logEntry);
+            results.scrollTop = results.scrollHeight;
+            console.log(`[${timestamp}] ${message}`);
+        }
+
+        function clearResults() {
+            document.getElementById('results').innerHTML = '';
+        }
+
+        async function testBasicConnection() {
+            log('🔍 Iniciando test de conexión básica...', 'info');
+            
+            try {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 10000);
+                
+                const response = await fetch(`${BACKEND_URL}/`, {
+                    method: 'GET',
+                    headers: {
+                        'Accept': 'application/json',
+                        'Content-Type': 'application/json',
+                    },
+                    signal: controller.signal,
+                });
+                
+                clearTimeout(timeoutId);
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    log('✅ Conexión básica exitosa', 'success');
+                    log(`📊 Respuesta: ${JSON.stringify(data, null, 2)}`, 'info');
+                } else {
+                    log(`❌ Error HTTP: ${response.status} ${response.statusText}`, 'error');
+                }
+            } catch (error) {
+                if (error.name === 'AbortError') {
+                    log('❌ Timeout: El servidor no responde en 10 segundos', 'error');
+                } else {
+                    log(`❌ Error de conexión: ${error.message}`, 'error');
+                }
+            }
+        }
+
+        async function testOptions() {
+            log('🎨 Iniciando test del endpoint /options...', 'info');
+            
+            try {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 30000);
+                
+                const response = await fetch(`${BACKEND_URL}/options`, {
+                    method: 'GET',
+                    headers: {
+                        'Accept': 'application/json',
+                        'Content-Type': 'application/json',
+                    },
+                    signal: controller.signal,
+                });
+                
+                clearTimeout(timeoutId);
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    log('✅ Endpoint /options funcionando correctamente', 'success');
+                    log(`🎵 Música disponible: ${data.music ? data.music.length : 0} opciones`, 'info');
+                    log(`🖼️ Marcos disponibles: ${data.frames ? data.frames.length : 0} opciones`, 'info');
+                    log(`🎨 Colores disponibles: ${data.colors ? data.colors.length : 0} opciones`, 'info');
+                    log(`📝 Fuentes disponibles: ${data.fonts ? data.fonts.length : 0} opciones`, 'info');
+                } else {
+                    log(`❌ Error HTTP en /options: ${response.status} ${response.statusText}`, 'error');
+                }
+            } catch (error) {
+                if (error.name === 'AbortError') {
+                    log('❌ Timeout en /options: El servidor tardó más de 30 segundos', 'error');
+                } else {
+                    log(`❌ Error obteniendo opciones: ${error.message}`, 'error');
+                }
+            }
+        }
+
+        async function testCORS() {
+            log('🌐 Iniciando test de CORS...', 'info');
+            
+            try {
+                const response = await fetch(`${BACKEND_URL}/options`, {
+                    method: 'OPTIONS',
+                });
+                
+                log('✅ Preflight OPTIONS completado', 'success');
+                log(`📊 Headers CORS disponibles:`, 'info');
+                
+                const corsHeaders = [
+                    'Access-Control-Allow-Origin',
+                    'Access-Control-Allow-Methods',
+                    'Access-Control-Allow-Headers',
+                    'Access-Control-Max-Age'
+                ];
+                
+                corsHeaders.forEach(header => {
+                    const value = response.headers.get(header);
+                    if (value) {
+                        log(`   ${header}: ${value}`, 'info');
+                    }
+                });
+                
+            } catch (error) {
+                log(`❌ Error en test CORS: ${error.message}`, 'error');
+            }
+        }
+
+        // Auto-ejecutar test básico al cargar
+        document.addEventListener('DOMContentLoaded', () => {
+            setTimeout(testBasicConnection, 1000);
+        });
+    </script>
+</body>
+</html>

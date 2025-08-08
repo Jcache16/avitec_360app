@@ -10,6 +10,8 @@
 import { useState, useEffect, useRef } from "react";
 import { StyleConfig, ProcessingProgress } from "@/utils/VideoProcessor";
 import { processVideoHybrid } from "@/utils/BackendService";
+// @ts-ignore
+import { QRCodeSVG } from 'qrcode.react';
 
 interface VideoPreviewProps {
   videoBlob: Blob;
@@ -36,6 +38,13 @@ export default function VideoPreview({
   const [processingStep, setProcessingStep] = useState("Iniciando...");
   const [error, setError] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [qrLink, setQrLink] = useState<string>("");
+  const [driveUploadData, setDriveUploadData] = useState<{
+    folderLink: string;
+    fileLink: string;
+    fileName: string;
+    date: string;
+  } | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const isProcessingRef = useRef(false);
   const hasProcessedRef = useRef(false);
@@ -223,15 +232,86 @@ export default function VideoPreview({
   };
 
   const uploadToGoogleDrive = async () => {
+    console.log('🌐 Iniciando subida a Google Drive (OAuth)...');
     setIsUploading(true);
+    setQrLink("");
+    setDriveUploadData(null);
 
-    // TODO: Implementar subida real a Google Drive
     try {
-      await new Promise(resolve => setTimeout(resolve, 3000));
-      alert('¡Video subido exitosamente a Google Drive!');
+      // Paso 1: Obtener el blob del video procesado
+      const response = await fetch(videoUrl);
+      if (!response.ok) {
+        throw new Error('Error obteniendo el video procesado');
+      }
+      
+      const videoBlob = await response.blob();
+      console.log('📦 Video blob obtenido:', {
+        size: videoBlob.size,
+        type: videoBlob.type
+      });
+      
+      // Paso 2: Crear FormData para enviar al backend OAuth
+      const formData = new FormData();
+      const fileName = `avitec-360-${Date.now()}.mp4`;
+      formData.append('video', videoBlob, fileName);
+      
+      // Paso 3: Llamar al endpoint OAuth del backend
+      console.log('📤 Subiendo a Drive via OAuth...');
+      const uploadResponse = await fetch('/api/upload/video-oauth', {
+        method: 'POST',
+        body: formData
+      });
+      
+      if (!uploadResponse.ok) {
+        const errorData = await uploadResponse.json();
+        
+        // Manejar errores específicos de OAuth
+        if (uploadResponse.status === 401) {
+          throw new Error('Token OAuth expirado. Contacte al administrador para renovar la autorización.');
+        } else if (uploadResponse.status === 507) {
+          throw new Error('Cuota de almacenamiento de Google Drive excedida. Libere espacio en su Drive personal.');
+        } else {
+          throw new Error(errorData.error || 'Error subiendo a Google Drive');
+        }
+      }
+      
+      const uploadResult = await uploadResponse.json();
+      console.log('✅ Subida OAuth exitosa:', uploadResult);
+      
+      if (uploadResult.success && uploadResult.data) {
+        setDriveUploadData({
+          folderLink: uploadResult.data.links.folder,
+          fileLink: uploadResult.data.links.view,
+          fileName: uploadResult.data.fileName,
+          date: uploadResult.data.date
+        });
+        setQrLink(uploadResult.data.links.view); // QR apunta directamente al video
+        
+        // Mostrar mensaje de éxito mejorado
+        alert(`¡Video subido exitosamente con OAuth!\n\nCarpeta: ${uploadResult.data.date}\nArchivo: ${uploadResult.data.fileName}\n\n✅ Usando cuota personal de Google Drive`);
+      } else {
+        throw new Error('Respuesta inesperada del servidor OAuth');
+      }
+      
     } catch (uploadError) {
-      console.error('Error subiendo a Google Drive:', uploadError);
-      alert('Error subiendo a Google Drive');
+      console.error('❌ Error subiendo a Google Drive:', uploadError);
+      
+      let errorMessage = 'Error subiendo a Google Drive';
+      if (uploadError instanceof Error) {
+        errorMessage = uploadError.message;
+      }
+      
+      // Mostrar diferentes mensajes según el tipo de error
+      if (errorMessage.includes('Token OAuth expirado')) {
+        alert('❌ Token OAuth expirado: Contacte al administrador para renovar la autorización de Google Drive.');
+      } else if (errorMessage.includes('cuota') || errorMessage.includes('quota')) {
+        alert('❌ Cuota excedida: El almacenamiento personal de Google Drive está lleno. Libere espacio e intente de nuevo.');
+      } else if (errorMessage.includes('permisos') || errorMessage.includes('forbidden')) {
+        alert('❌ Error de permisos: No hay permisos suficientes en Google Drive.');
+      } else {
+        alert(`❌ Error OAuth: ${errorMessage}\n\nIntenta de nuevo en unos momentos.`);
+      }
+      
     } finally {
       setIsUploading(false);
     }
@@ -532,6 +612,53 @@ export default function VideoPreview({
             🔍 Debug Info Completo
           </button>
         </div>
+
+        {/* Sección de QR Code si se subió a Google Drive */}
+        {qrLink && driveUploadData && (
+          <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-6 border border-white/20">
+            <div className="text-center">
+              <h3 className="text-white font-bold text-lg mb-3">
+                📱 ¡Video subido a la nube!
+              </h3>
+              
+              <div className="bg-white p-4 rounded-xl mb-4 inline-block">
+                <QRCodeSVG 
+                  value={qrLink}
+                  size={150}
+                  level="M"
+                  includeMargin={true}
+                />
+              </div>
+              
+              <div className="space-y-2 text-sm">
+                <p className="text-white/80">
+                  📅 <strong>Fecha:</strong> {driveUploadData.date}
+                </p>
+                <p className="text-white/80">
+                  📁 <strong>Archivo:</strong> {driveUploadData.fileName}
+                </p>
+                <p className="text-white/60 text-xs">
+                  Escanea el código QR para acceder a todos los videos de hoy
+                </p>
+              </div>
+              
+              <div className="flex gap-2 mt-4">
+                <button
+                  onClick={() => window.open(driveUploadData.folderLink, '_blank')}
+                  className="flex-1 bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded-xl text-sm transition-all duration-300"
+                >
+                  📂 Ver carpeta
+                </button>
+                <button
+                  onClick={() => window.open(driveUploadData.fileLink, '_blank')}
+                  className="flex-1 bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded-xl text-sm transition-all duration-300"
+                >
+                  🎬 Ver video
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Botón para crear otro video */}
         <button

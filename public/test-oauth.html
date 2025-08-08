@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test OAuth - Avitec 360</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 40px auto;
+            padding: 20px;
+            background: #1a1a2e;
+            color: white;
+        }
+        .container {
+            background: #16213e;
+            padding: 20px;
+            border-radius: 10px;
+            margin: 20px 0;
+        }
+        button {
+            background: #8B5CF6;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background: #7C3AED;
+        }
+        .success { color: #22c55e; }
+        .error { color: #ef4444; }
+        .info { color: #3b82f6; }
+        pre {
+            background: #0a0a0a;
+            padding: 10px;
+            border-radius: 5px;
+            overflow-x: auto;
+            white-space: pre-wrap;
+        }
+        #fileInput {
+            background: #2a2a4e;
+            color: white;
+            padding: 10px;
+            border: 1px solid #8B5CF6;
+            border-radius: 5px;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <h1>🧪 Test OAuth - Subida de Videos</h1>
+    
+    <div class="container">
+        <h3>Estado del Sistema</h3>
+        <p><strong>Proxy OAuth:</strong> <span id="oauth-status">Verificando...</span></p>
+        <p><strong>Backend URL:</strong> <span id="backend-url">Cargando...</span></p>
+    </div>
+
+    <div class="container">
+        <h3>Pruebas de Conectividad</h3>
+        <button onclick="testOAuthProxy()">🔐 Test Proxy OAuth</button>
+        <button onclick="testBackendDirect()">🌐 Test Backend Directo</button>
+        <button onclick="clearResults()">🧹 Limpiar</button>
+    </div>
+
+    <div class="container">
+        <h3>Test de Subida de Video</h3>
+        <p>⚠️ <strong>Solo para pruebas con archivos pequeños (máx 10MB)</strong></p>
+        <input type="file" id="fileInput" accept="video/*" />
+        <button onclick="testVideoUpload()">📤 Subir Video (OAuth)</button>
+    </div>
+
+    <div class="container">
+        <h3>Resultados</h3>
+        <div id="results"></div>
+    </div>
+
+    <script>
+        function log(message, type = 'info') {
+            const results = document.getElementById('results');
+            const timestamp = new Date().toLocaleTimeString();
+            const logEntry = document.createElement('div');
+            logEntry.className = type;
+            logEntry.innerHTML = `<strong>[${timestamp}]</strong> ${message}`;
+            results.appendChild(logEntry);
+            results.scrollTop = results.scrollHeight;
+            console.log(`[${timestamp}] ${message}`);
+        }
+
+        function clearResults() {
+            document.getElementById('results').innerHTML = '';
+        }
+
+        async function testOAuthProxy() {
+            log('🔐 Probando proxy OAuth local...', 'info');
+            
+            try {
+                const response = await fetch('/api/upload/test-oauth', {
+                    method: 'GET',
+                    headers: {
+                        'Accept': 'application/json',
+                    },
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    log('✅ Proxy OAuth funcionando correctamente', 'success');
+                    log(`📊 Respuesta: ${JSON.stringify(data, null, 2)}`, 'info');
+                    document.getElementById('oauth-status').textContent = 'Funcionando ✅';
+                } else {
+                    const errorData = await response.json();
+                    log(`❌ Error en proxy OAuth: ${response.status} ${response.statusText}`, 'error');
+                    log(`📊 Error: ${JSON.stringify(errorData, null, 2)}`, 'error');
+                    document.getElementById('oauth-status').textContent = 'Error ❌';
+                }
+            } catch (error) {
+                log(`❌ Error de conexión con proxy OAuth: ${error.message}`, 'error');
+                document.getElementById('oauth-status').textContent = 'Error de conexión ❌';
+            }
+        }
+
+        async function testBackendDirect() {
+            log('🌐 Probando backend directo...', 'info');
+            
+            try {
+                const backendUrl = 'https://avitec360-backend.onrender.com';
+                document.getElementById('backend-url').textContent = backendUrl;
+                
+                const response = await fetch(`${backendUrl}/api/upload/test-oauth`, {
+                    method: 'GET',
+                    headers: {
+                        'Accept': 'application/json',
+                    },
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    log('✅ Backend directo funcionando', 'success');
+                    log(`📊 Respuesta: ${JSON.stringify(data, null, 2)}`, 'info');
+                } else {
+                    const errorData = await response.json();
+                    log(`❌ Error en backend directo: ${response.status}`, 'error');
+                    log(`📊 Error: ${JSON.stringify(errorData, null, 2)}`, 'error');
+                }
+            } catch (error) {
+                log(`❌ Error conectando con backend directo: ${error.message}`, 'error');
+            }
+        }
+
+        async function testVideoUpload() {
+            const fileInput = document.getElementById('fileInput');
+            const file = fileInput.files[0];
+            
+            if (!file) {
+                log('❌ Por favor seleccione un archivo de video', 'error');
+                return;
+            }
+            
+            if (file.size > 10 * 1024 * 1024) { // 10MB
+                log('❌ Archivo demasiado grande para test (máx 10MB)', 'error');
+                return;
+            }
+            
+            log(`📤 Iniciando subida de: ${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB)`, 'info');
+            
+            try {
+                const formData = new FormData();
+                formData.append('video', file);
+                
+                const response = await fetch('/api/upload/video-oauth', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok && result.success) {
+                    log('✅ Subida exitosa!', 'success');
+                    log(`📁 Archivo: ${result.data.fileName}`, 'success');
+                    log(`📅 Fecha: ${result.data.date}`, 'info');
+                    log(`🔗 Enlaces:`, 'info');
+                    log(`   📁 Carpeta: ${result.data.links.folder}`, 'info');
+                    log(`   👁️ Ver: ${result.data.links.view}`, 'info');
+                    log(`   ⬇️ Descargar: ${result.data.links.download}`, 'info');
+                    
+                    // Mostrar enlace clicable
+                    const linkDiv = document.createElement('div');
+                    linkDiv.innerHTML = `<a href="${result.data.links.view}" target="_blank" style="color: #22c55e; text-decoration: underline;">🎬 Ver video en Google Drive</a>`;
+                    document.getElementById('results').appendChild(linkDiv);
+                    
+                } else {
+                    log(`❌ Error en subida: ${result.error || 'Error desconocido'}`, 'error');
+                    if (result.details) {
+                        log(`📊 Detalles: ${result.details}`, 'error');
+                    }
+                }
+                
+            } catch (error) {
+                log(`❌ Error durante la subida: ${error.message}`, 'error');
+            }
+        }
+
+        // Auto-ejecutar tests al cargar
+        document.addEventListener('DOMContentLoaded', () => {
+            setTimeout(testOAuthProxy, 1000);
+        });
+    </script>
+</body>
+</html>

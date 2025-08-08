@@ -4,6 +4,9 @@
  * Versión 1.5.0 - Solo procesamiento de video (sin generación de overlays)
  */
 
+// Cargar variables de entorno al inicio
+require('dotenv').config();
+
 const express = require('express');
 const multer = require('multer');
 const ffmpeg = require('fluent-ffmpeg');
@@ -593,19 +596,31 @@ app.post('/process-video', upload.fields([{ name: 'video', maxCount: 1 }, { name
 
     console.log(`[${processingId}] ✅ Procesamiento completado. Enviando archivo: ${path.basename(outputPath)}`);
     
-    res.download(outputPath, `video-360-${processingId}.mp4`, async (err) => {
+    // Obtener información del archivo para posible subida a Drive
+    const outputStats = await fs.stat(outputPath);
+    const outputFileName = `video-360-${processingId}.mp4`;
+    
+    // Agregar headers con metadata del archivo procesado
+    res.setHeader('X-Processed-File-Path', outputPath);
+    res.setHeader('X-Processed-File-Name', outputFileName);
+    res.setHeader('X-Processed-File-Size', outputStats.size.toString());
+    res.setHeader('X-Processing-Id', processingId);
+    
+    res.download(outputPath, outputFileName, async (err) => {
       if (err) {
         console.error(`[${processingId}] ❌ Error enviando archivo:`, err);
       } else {
         console.log(`[${processingId}] 📤 Archivo enviado exitosamente`);
       }
       
-      // Limpieza de archivos
+      // NOTA: NO eliminar outputPath inmediatamente para permitir subida a Drive
+      // El archivo se limpiará después con el cleanup automático de archivos antiguos
+      
+      // Limpieza de archivos temporales únicamente
       try {
         if (await fs.pathExists(videoFile.path)) await fs.remove(videoFile.path);
         if (await fs.pathExists(overlayPath)) await fs.remove(overlayPath);
-        if (await fs.pathExists(outputPath)) await fs.remove(outputPath);
-        console.log(`[${processingId}] 🧹 Archivos limpiados`);
+        console.log(`[${processingId}] 🧹 Archivos temporales limpiados (output preservado para Drive)`);
       } catch (cleanupError) {
         console.error(`[${processingId}] ❌ Error limpiando archivos post-envío:`, cleanupError);
       }
@@ -648,6 +663,320 @@ app.get('/options', (req, res) => {
     frames: [{ id: "none", name: "Sin marco" }, { id: "custom", name: "Personalizado" }],
     colors: ["#8B5CF6", "#EC4899", "#EF4444", "#F97316", "#EAB308", "#22C55E", "#06B6D4", "#3B82F6", "#6366F1", "#FFFFFF", "#000000"]
   });
+});
+
+// 🌐 RUTAS DE GOOGLE DRIVE - INCLUIR OAUTH
+
+// Importar rutas OAuth
+const uploadOAuthRouter = require('./routes/upload-oauth');
+app.use('/api/upload', uploadOAuthRouter);
+
+/**
+ * Verificar conexión con Google Drive (Service Account)
+ */
+app.get('/drive/test', async (req, res) => {
+  try {
+    const { testDriveConnection } = require('./services/driveUtils');
+    const isConnected = await testDriveConnection();
+    
+    if (isConnected) {
+      res.json({ 
+        success: true, 
+        message: 'Conexión con Google Drive (Service Account) exitosa',
+        timestamp: new Date().toISOString()
+      });
+    } else {
+      res.status(500).json({ 
+        success: false, 
+        error: 'No se pudo conectar con Google Drive',
+        timestamp: new Date().toISOString()
+      });
+    }
+  } catch (error) {
+    console.error('❌ Error en test de Google Drive:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+/**
+ * Verificar conexión OAuth con Google Drive 
+ */
+app.get('/drive/test-oauth', async (req, res) => {
+  try {
+    const { testOAuthConnection } = require('./services/googleDriveOAuth');
+    const result = await testOAuthConnection();
+    
+    res.json({ 
+      success: true, 
+      message: 'Conexión OAuth con Google Drive exitosa',
+      data: result,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('❌ Error en test OAuth de Google Drive:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+/**
+ * Subir video procesado a Google Drive
+ */
+app.post('/upload-to-drive', async (req, res) => {
+  const uploadId = uuidv4();
+  console.log(`[${uploadId}] 📤 Iniciando subida a Google Drive`);
+  
+  try {
+    // Manejar dos tipos de entrada:
+    // 1. Archivo ya existente en el servidor (filePath)
+    // 2. Datos del video enviados desde el frontend (videoData)
+    
+    let localFilePath;
+    let fileName;
+    let shouldCleanupFile = false;
+    
+    if (req.body.filePath) {
+      // Caso 1: Archivo ya existe en el servidor
+      const { filePath, fileName: providedFileName, customDate } = req.body;
+      
+      if (!await fs.pathExists(filePath)) {
+        return res.status(404).json({ 
+          success: false, 
+          error: 'Archivo no encontrado en el servidor',
+          uploadId
+        });
+      }
+      
+      localFilePath = filePath;
+      fileName = providedFileName || path.basename(filePath);
+      
+    } else if (req.body.videoData && req.body.fileName) {
+      // Caso 2: Datos del video enviados desde frontend
+      console.log(`[${uploadId}] 📦 Recibiendo datos de video desde frontend`);
+      
+      const { videoData, fileName: providedFileName, customDate } = req.body;
+      
+      if (!Array.isArray(videoData)) {
+        return res.status(400).json({ 
+          success: false, 
+          error: 'Formato de videoData inválido',
+          uploadId
+        });
+      }
+      
+      // Crear archivo temporal desde los datos
+      const tempDir = path.join(__dirname, 'temp');
+      await fs.ensureDir(tempDir);
+      
+      localFilePath = path.join(tempDir, `temp-${uploadId}.mp4`);
+      fileName = providedFileName;
+      shouldCleanupFile = true;
+      
+      // Convertir array de bytes a Buffer y escribir archivo
+      const videoBuffer = Buffer.from(videoData);
+      await fs.writeFile(localFilePath, videoBuffer);
+      
+      console.log(`[${uploadId}] 💾 Archivo temporal creado: ${(videoBuffer.length / 1024 / 1024).toFixed(2)} MB`);
+      
+    } else {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Parámetros requeridos: (filePath y fileName) o (videoData y fileName)',
+        uploadId
+      });
+    }
+    
+    console.log(`[${uploadId}] 📁 Archivo a subir: ${fileName} (${localFilePath})`);
+    
+    // Obtener fecha para la carpeta (usar customDate si se proporciona, sino fecha actual)
+    const customDate = req.body.customDate;
+    const date = customDate || new Date().toISOString().split('T')[0];
+    console.log(`[${uploadId}] 📅 Fecha de carpeta: ${date}`);
+    
+    const { ensureDateFolder, uploadVideoToDrive, getFolderPublicLink, getFilePublicLink } = require('./services/driveUtils');
+    
+    // Crear/obtener carpeta de fecha
+    const folderId = await ensureDateFolder(date);
+    console.log(`[${uploadId}] ✅ Carpeta de fecha asegurada: ${folderId}`);
+    
+    // Subir archivo
+    const fileId = await uploadVideoToDrive(localFilePath, fileName, folderId);
+    console.log(`[${uploadId}] ✅ Video subido exitosamente: ${fileId}`);
+    
+    // Obtener enlaces públicos
+    const folderLink = getFolderPublicLink(folderId);
+    const fileLink = getFilePublicLink(fileId);
+    
+    console.log(`[${uploadId}] 🔗 Enlaces generados:`, { folderLink, fileLink });
+    
+    // Limpiar archivo temporal si fue creado
+    if (shouldCleanupFile && await fs.pathExists(localFilePath)) {
+      await fs.remove(localFilePath);
+      console.log(`[${uploadId}] 🧹 Archivo temporal limpiado`);
+    }
+    
+    res.json({ 
+      success: true, 
+      message: 'Video subido exitosamente a Google Drive',
+      data: {
+        folderId,
+        fileId,
+        folderLink,
+        fileLink,
+        date,
+        fileName
+      },
+      uploadId,
+      timestamp: new Date().toISOString()
+    });
+    
+  } catch (error) {
+    console.error(`[${uploadId}] ❌ Error subiendo a Google Drive:`, error);
+    
+    let statusCode = 500;
+    let errorMessage = 'Error interno subiendo a Google Drive';
+    
+    if (error.message.includes('credentials') || error.message.includes('authentication')) {
+      statusCode = 401;
+      errorMessage = 'Error de autenticación con Google Drive. Verifica las credenciales.';
+    } else if (error.message.includes('quota') || error.message.includes('limite')) {
+      statusCode = 507;
+      errorMessage = 'Cuota de Google Drive excedida.';
+    } else if (error.message.includes('permission') || error.message.includes('forbidden')) {
+      statusCode = 403;
+      errorMessage = 'Permisos insuficientes en Google Drive.';
+    }
+    
+    res.status(statusCode).json({ 
+      success: false, 
+      error: errorMessage,
+      technicalError: error.message,
+      uploadId,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+/**
+ * Obtener información de la carpeta de una fecha específica
+ */
+app.get('/drive/folder/:date', async (req, res) => {
+  try {
+    const { date } = req.params;
+    
+    // Validar formato de fecha
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Formato de fecha inválido. Use YYYY-MM-DD'
+      });
+    }
+    
+    const { ensureDateFolder, getFolderPublicLink } = require('./services/driveUtils');
+    
+    const folderId = await ensureDateFolder(date);
+    const folderLink = getFolderPublicLink(folderId);
+    
+    res.json({ 
+      success: true, 
+      data: {
+        date,
+        folderId,
+        folderLink
+      },
+      timestamp: new Date().toISOString()
+    });
+    
+  } catch (error) {
+    console.error('❌ Error obteniendo carpeta de Drive:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+/**
+ * 🧪 Endpoint de prueba completa (solo para testing)
+ */
+app.post('/drive/test-upload', upload.single('testVideo'), async (req, res) => {
+  const testId = uuidv4();
+  console.log(`[${testId}] 🧪 Test de subida completa iniciado`);
+  
+  try {
+    if (!req.file) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Se requiere un archivo de video para el test'
+      });
+    }
+    
+    const { ensureDateFolder, uploadVideoToDrive, getFolderPublicLink, getFilePublicLink } = require('./services/driveUtils');
+    
+    const testDate = new Date().toISOString().split('T')[0];
+    const testFileName = `test-${testId}.mp4`;
+    
+    console.log(`[${testId}] 📁 Archivo de test: ${req.file.originalname} → ${testFileName}`);
+    
+    // Crear carpeta y subir
+    const folderId = await ensureDateFolder(testDate);
+    const fileId = await uploadVideoToDrive(req.file.path, testFileName, folderId);
+    
+    // Generar enlaces
+    const folderLink = getFolderPublicLink(folderId);
+    const fileLink = getFilePublicLink(fileId);
+    
+    // Limpiar archivo temporal
+    if (await fs.pathExists(req.file.path)) {
+      await fs.remove(req.file.path);
+    }
+    
+    console.log(`[${testId}] ✅ Test completado exitosamente`);
+    
+    res.json({
+      success: true,
+      message: '🧪 Test de subida completado exitosamente',
+      data: {
+        testId,
+        folderId,
+        fileId,
+        folderLink,
+        fileLink,
+        date: testDate,
+        fileName: testFileName,
+        originalFile: req.file.originalname,
+        fileSize: req.file.size
+      },
+      instructions: {
+        qr: `Genera un QR con esta URL: ${folderLink}`,
+        access: `Accede directamente: ${folderLink}`,
+        video: `Ver video: ${fileLink}`
+      }
+    });
+    
+  } catch (error) {
+    console.error(`[${testId}] ❌ Error en test de subida:`, error);
+    
+    // Limpiar archivo en caso de error
+    if (req.file && await fs.pathExists(req.file.path)) {
+      await fs.remove(req.file.path);
+    }
+    
+    res.status(500).json({
+      success: false,
+      error: 'Error en test de subida',
+      technicalError: error.message,
+      testId
+    });
+  }
 });
 
 // Middleware de manejo de errores (sin omitir)

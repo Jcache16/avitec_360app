@@ -5,12 +5,11 @@ const nextConfig: NextConfig = {
   
   // Variables de entorno
   env: {
-    NEXT_PUBLIC_BACKEND_URL: process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3000',
+    NEXT_PUBLIC_BACKEND_URL: process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3001',
     NEXT_PUBLIC_USE_BACKEND: process.env.NEXT_PUBLIC_USE_BACKEND || 'true',
-    NEXT_PUBLIC_BACKEND_TIMEOUT: process.env.NEXT_PUBLIC_BACKEND_TIMEOUT || '300000'
+    NEXT_PUBLIC_BACKEND_TIMEOUT: process.env.NEXT_PUBLIC_BACKEND_TIMEOUT || '60000'
   },
   
-  // Headers necesarios para SharedArrayBuffer y FFmpeg.wasm (fallback local)
   async headers() {
     return [
       {
@@ -28,6 +27,7 @@ const nextConfig: NextConfig = {
       },
     ];
   },
+  
 
   // Optimización para WebAssembly (fallback local)
   webpack: (config, { isServer }) => {

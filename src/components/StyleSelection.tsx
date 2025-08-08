@@ -12,6 +12,7 @@ import Image from "next/image";
 import { StyleConfig } from "@/utils/VideoProcessor";
 import { generateOverlayPNG } from "@/utils/OverlayGenerator";
 import { generateSimpleOverlayPNG } from "@/utils/SimpleOverlayGenerator";
+import { BackendConnection } from "@/utils/BackendConnection";
 
 interface StyleSelectionProps {
   onContinue: (styleConfig: StyleConfig, overlayPNG: Blob) => void;
@@ -99,34 +100,56 @@ export default function StyleSelection({ onContinue, onBack }: StyleSelectionPro
   // Estado para opciones dinámicas del backend
   const [musicOptions, setMusicOptions] = useState<MusicOption[]>(DEFAULT_MUSIC_OPTIONS);
   const [isLoadingOptions, setIsLoadingOptions] = useState<boolean>(true);
+  const [backendStatus, setBackendStatus] = useState<string>('connecting');
+  const [backendError, setBackendError] = useState<string | null>(null);
 
   // Cargar opciones del backend al montar el componente
   useEffect(() => {
     const loadBackendOptions = async () => {
       try {
-        console.log('🔄 Cargando opciones del backend...');
-        const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3001';
-        const response = await fetch(`${backendUrl}/options`);
-        
-        if (response.ok) {
-          const backendOptions: BackendOptions = await response.json();
-          console.log('✅ Opciones del backend cargadas:', backendOptions);
-          
-          // Transformar opciones de música del backend al formato del frontend
-          const transformedMusicOptions: MusicOption[] = backendOptions.music.map(music => ({
-            id: music.id,
-            name: music.name,
-            preview: music.id !== "none" && music.file ? `/music/${music.file}` : undefined
-          }));
-          
-          setMusicOptions(transformedMusicOptions);
-          console.log('🎵 Opciones de música actualizadas:', transformedMusicOptions);
-        } else {
-          console.warn('⚠️ Error al cargar opciones del backend, usando opciones por defecto');
+        console.log('🔄 Iniciando conexión con backend...');
+        setBackendStatus('connecting');
+        setBackendError(null);
+
+        // Primero probar conexión básica
+        const connectionTest = await BackendConnection.testConnection();
+        if (!connectionTest.success) {
+          throw new Error(`Conexión falló: ${connectionTest.message}`);
         }
+
+        console.log('✅ Conexión básica establecida, obteniendo opciones...');
+        setBackendStatus('loading');
+
+        // Obtener opciones
+        const optionsResult = await BackendConnection.getOptions();
+        if (!optionsResult.success) {
+          throw new Error(`Error obteniendo opciones: ${optionsResult.message}`);
+        }
+
+        const backendOptions: BackendOptions = optionsResult.data;
+        console.log('✅ Opciones del backend cargadas:', backendOptions);
+        
+        // Transformar opciones de música del backend al formato del frontend
+        const transformedMusicOptions: MusicOption[] = backendOptions.music.map(music => ({
+          id: music.id,
+          name: music.name,
+          preview: music.id !== "none" && music.file ? `/music/${music.file}` : undefined
+        }));
+        
+        setMusicOptions(transformedMusicOptions);
+        setBackendStatus('connected');
+        console.log('🎵 Opciones de música actualizadas:', transformedMusicOptions);
+
       } catch (error) {
-        console.error('❌ Error conectando con el backend:', error);
-        console.log('🔄 Usando opciones por defecto');
+        if (error instanceof Error) {
+          console.error('❌ Error conectando con el backend:', error.message);
+          setBackendError(error.message);
+        } else {
+          console.error('❌ Error desconocido:', error);
+          setBackendError('Error desconocido');
+        }
+        setBackendStatus('error');
+        console.log('🔄 Usando opciones por defecto debido al error');
       } finally {
         setIsLoadingOptions(false);
       }
@@ -134,6 +157,46 @@ export default function StyleSelection({ onContinue, onBack }: StyleSelectionPro
 
     loadBackendOptions();
   }, []);
+
+  // Función para reintentar conexión
+  const retryConnection = () => {
+    setIsLoadingOptions(true);
+    const loadBackendOptions = async () => {
+      try {
+        console.log('🔄 Reintentando conexión con backend...');
+        setBackendStatus('connecting');
+        setBackendError(null);
+
+        const optionsResult = await BackendConnection.getOptions();
+        if (!optionsResult.success) {
+          throw new Error(`Error obteniendo opciones: ${optionsResult.message}`);
+        }
+
+        const backendOptions: BackendOptions = optionsResult.data;
+        const transformedMusicOptions: MusicOption[] = backendOptions.music.map(music => ({
+          id: music.id,
+          name: music.name,
+          preview: music.id !== "none" && music.file ? `/music/${music.file}` : undefined
+        }));
+        
+        setMusicOptions(transformedMusicOptions);
+        setBackendStatus('connected');
+        console.log('✅ Reconexión exitosa');
+
+      } catch (error) {
+        if (error instanceof Error) {
+          setBackendError(error.message);
+        } else {
+          setBackendError('Error desconocido');
+        }
+        setBackendStatus('error');
+      } finally {
+        setIsLoadingOptions(false);
+      }
+    };
+
+    loadBackendOptions();
+  };
   
 
   const handleMusicPreview = async (musicId: string) => {
@@ -259,6 +322,40 @@ export default function StyleSelection({ onContinue, onBack }: StyleSelectionPro
           <p className="text-purple-200 text-sm">
             Elige el estilo para tu experiencia 360°
           </p>
+          
+          {/* Indicador de estado del backend */}
+          <div className="mt-3 flex items-center justify-center gap-2">
+            {backendStatus === 'connecting' && (
+              <div className="flex items-center gap-2 text-yellow-300 text-xs">
+                <div className="w-2 h-2 bg-yellow-300 rounded-full animate-pulse"></div>
+                <span>Conectando con servidor...</span>
+              </div>
+            )}
+            {backendStatus === 'loading' && (
+              <div className="flex items-center gap-2 text-blue-300 text-xs">
+                <div className="w-2 h-2 bg-blue-300 rounded-full animate-pulse"></div>
+                <span>Cargando opciones...</span>
+              </div>
+            )}
+            {backendStatus === 'connected' && (
+              <div className="flex items-center gap-2 text-green-300 text-xs">
+                <div className="w-2 h-2 bg-green-300 rounded-full"></div>
+                <span>Servidor conectado</span>
+              </div>
+            )}
+            {backendStatus === 'error' && (
+              <div className="flex items-center gap-2 text-red-300 text-xs">
+                <div className="w-2 h-2 bg-red-300 rounded-full"></div>
+                <span>Error: {backendError}</span>
+                <button
+                  onClick={retryConnection}
+                  className="ml-2 text-white/70 hover:text-white underline"
+                >
+                  Reintentar
+                </button>
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Vista previa */}
@@ -326,6 +423,12 @@ export default function StyleSelection({ onContinue, onBack }: StyleSelectionPro
             <h3 className="text-white font-semibold mb-3 flex items-center gap-2">
               <span>🎵</span> Música de fondo
               {isLoadingOptions && <span className="text-xs text-white/60">(Cargando...)</span>}
+              {backendStatus === 'connected' && (
+                <span className="text-xs text-green-300">({musicOptions.length} opciones)</span>
+              )}
+              {backendStatus === 'error' && (
+                <span className="text-xs text-red-300">(Modo offline)</span>
+              )}
             </h3>
             <div className="grid grid-cols-2 gap-2">
               {musicOptions.map((music: MusicOption) => (
