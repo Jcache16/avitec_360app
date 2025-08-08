@@ -31,10 +31,10 @@ function drawRoundedRect(
  */
 export async function generateSimpleOverlayPNG(
   config: StyleConfig,
-  width: number = 720,
-  height: number = 1280
+  width: number = 480,  // CORREGIDO: de 720 a 480
+  height: number = 854  // CORREGIDO: de 1280 a 854
 ): Promise<Blob> {
-  return new Promise((resolve, reject) => {
+  return new Promise(async (resolve, reject) => {
     try {
       console.log('🎨 Generando overlay simple con Canvas nativo');
       
@@ -54,50 +54,83 @@ export async function generateSimpleOverlayPNG(
       // --- Marco decorativo ---
       if (config.frame && config.frame !== "none") {
         console.log('🖼️ Dibujando marco:', config.frame);
-        const color = config.frameColor || "#FFFFFF";
         
-        // Marco exterior
-        ctx.strokeStyle = color;
-        ctx.lineWidth = 22;
-        drawRoundedRect(ctx, 11, 11, width - 22, height - 22, 44);
-        ctx.stroke();
-        
-        // Marco interior
-        ctx.strokeStyle = color + "80";
-        ctx.lineWidth = 8;
-        drawRoundedRect(ctx, 34, 34, width - 68, height - 68, 16);
-        ctx.stroke();
+        if (config.frame === "custom" && config.frameColor) {
+          // Marco personalizado con color
+          const color = config.frameColor;
+          
+          // Marco exterior (proporciones ajustadas para 480x854)
+          ctx.strokeStyle = color;
+          ctx.lineWidth = 16;  // Reducido de 22 a 16
+          drawRoundedRect(ctx, 8, 8, width - 16, height - 16, 32);  // Ajustado
+          ctx.stroke();
+          
+          // Marco interior
+          ctx.strokeStyle = color + "80";
+          ctx.lineWidth = 6;  // Reducido de 8 a 6
+          drawRoundedRect(ctx, 24, 24, width - 48, height - 48, 12);  // Ajustado
+          ctx.stroke();
+          
+        } else if (config.frame !== "custom") {
+          // Marco PNG predefinido
+          try {
+            console.log(`📸 Cargando imagen de marco: /frames/${config.frame}.png`);
+            
+            const img = new Image();
+            img.crossOrigin = 'anonymous';
+            
+            await new Promise<void>((resolveImg, rejectImg) => {
+              img.onload = () => resolveImg();
+              img.onerror = () => rejectImg(new Error(`Error cargando imagen: /frames/${config.frame}.png`));
+              img.src = `/frames/${config.frame}.png`;
+            });
+            
+            // Dibujar la imagen escalada al tamaño del canvas
+            ctx.drawImage(img, 0, 0, width, height);
+            console.log('✅ Marco PNG dibujado exitosamente');
+            
+          } catch (imgError) {
+            console.warn('⚠️ Error cargando marco PNG, continuando sin marco:', imgError);
+          }
+        }
       }
       
       // --- Texto personalizado ---
       if (config.text && config.text.trim()) {
         console.log('📝 Dibujando texto:', config.text);
         
-        // Fondo del texto
+        // Fondo del texto (proporciones ajustadas para 480x854)
         ctx.fillStyle = "rgba(0,0,0,0.7)";
-        drawRoundedRect(ctx, width / 2 - 200, height - 110, 400, 78, 16);
+        drawRoundedRect(ctx, width / 2 - 140, height - 80, 280, 56, 12);  // Ajustado
         ctx.fill();
         
         // Configurar fuente
-        const fontSize = 48;
-        ctx.font = `bold ${fontSize}px sans-serif`;
+        const fontSize = 32;  // Reducido de 48 a 32
+        const fontMap: Record<string, string> = {
+          playfair: "serif",
+          chewy: "cursive",
+          montserrat: "sans-serif",
+        };
+        const fontFamily = fontMap[config.textFont || "montserrat"] || "sans-serif";
+        
+        ctx.font = `bold ${fontSize}px ${fontFamily}`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         
         // Sombra del texto
         ctx.shadowColor = 'rgba(0,0,0,0.8)';
-        ctx.shadowBlur = 8;
-        ctx.shadowOffsetX = 2;
-        ctx.shadowOffsetY = 2;
+        ctx.shadowBlur = 6;  // Reducido de 8 a 6
+        ctx.shadowOffsetX = 1.5;  // Reducido de 2 a 1.5
+        ctx.shadowOffsetY = 1.5;
         
         // Stroke del texto
         ctx.strokeStyle = '#000000';
-        ctx.lineWidth = 3;
-        ctx.strokeText(config.text, width / 2, height - 71);
+        ctx.lineWidth = 1.5;  // Reducido de 3 a 1.5
+        ctx.strokeText(config.text, width / 2, height - 52);  // Ajustado de 71 a 52
         
         // Fill del texto
         ctx.fillStyle = config.textColor || "#FFFFFF";
-        ctx.fillText(config.text, width / 2, height - 71);
+        ctx.fillText(config.text, width / 2, height - 52);
         
         // Resetear sombra
         ctx.shadowColor = 'transparent';

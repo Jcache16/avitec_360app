@@ -1,4 +1,4 @@
-import { StaticCanvas, Rect, Text, Shadow } from 'fabric';
+import { StaticCanvas, Rect, Text, Shadow, FabricImage } from 'fabric';
 import { StyleConfig } from "@/utils/VideoProcessor";
 
 /**
@@ -31,32 +31,68 @@ export async function generateOverlayPNG(
       // --- Marco decorativo ---
       if (config.frame && config.frame !== "none") {
         console.log('🖼️ Agregando marco:', config.frame);
-        const color = config.frameColor || "#FFFFFF";
         
-        // CORREGIDO: Proporciones ajustadas para 480x854
-        const outerRect = new Rect({
-          left: 8, top: 8,   // Reducido de 11 a 8
-          width: width - 16,  // Reducido de 22 a 16
-          height: height - 16,
-          rx: 32, ry: 32,    // Reducido de 44 a 32
-          stroke: color, 
-          strokeWidth: 16,   // Reducido de 22 a 16
-          fill: "transparent", 
-          selectable: false
-        });
-        canvas.add(outerRect);
+        if (config.frame === "custom" && config.frameColor) {
+          // Marco personalizado con color
+          const color = config.frameColor;
+          
+          // CORREGIDO: Proporciones ajustadas para 480x854
+          const outerRect = new Rect({
+            left: 8, top: 8,   // Reducido de 11 a 8
+            width: width - 16,  // Reducido de 22 a 16
+            height: height - 16,
+            rx: 32, ry: 32,    // Reducido de 44 a 32
+            stroke: color, 
+            strokeWidth: 16,   // Reducido de 22 a 16
+            fill: "transparent", 
+            selectable: false
+          });
+          canvas.add(outerRect);
 
-        const innerRect = new Rect({
-          left: 24, top: 24,  // Reducido de 34 a 24
-          width: width - 48,  // Reducido de 68 a 48
-          height: height - 48,
-          rx: 12, ry: 12,    // Reducido de 16 a 12
-          stroke: color + "80", 
-          strokeWidth: 6,    // Reducido de 8 a 6
-          fill: "transparent", 
-          selectable: false
-        });
-        canvas.add(innerRect);
+          const innerRect = new Rect({
+            left: 24, top: 24,  // Reducido de 34 a 24
+            width: width - 48,  // Reducido de 68 a 48
+            height: height - 48,
+            rx: 12, ry: 12,    // Reducido de 16 a 12
+            stroke: color + "80", 
+            strokeWidth: 6,    // Reducido de 8 a 6
+            fill: "transparent", 
+            selectable: false
+          });
+          canvas.add(innerRect);
+          
+        } else if (config.frame !== "custom") {
+          // Marco PNG predefinido
+          try {
+            console.log(`📸 Cargando imagen de marco: /frames/${config.frame}.png`);
+            
+            // Crear elemento de imagen
+            const imgElement = document.createElement('img');
+            imgElement.crossOrigin = 'anonymous';
+            
+            await new Promise<void>((resolveImg, rejectImg) => {
+              imgElement.onload = () => resolveImg();
+              imgElement.onerror = () => rejectImg(new Error(`Error cargando imagen: /frames/${config.frame}.png`));
+              imgElement.src = `/frames/${config.frame}.png`;
+            });
+            
+            // Crear objeto fabric image
+            const fabricImg = new FabricImage(imgElement, {
+              left: 0,
+              top: 0,
+              scaleX: width / imgElement.width,
+              scaleY: height / imgElement.height,
+              selectable: false,
+              evented: false
+            });
+            
+            canvas.add(fabricImg);
+            console.log('✅ Marco PNG agregado exitosamente');
+            
+          } catch (imgError) {
+            console.warn('⚠️ Error cargando marco PNG, continuando sin marco:', imgError);
+          }
+        }
       }
 
       // --- Texto personalizado ---

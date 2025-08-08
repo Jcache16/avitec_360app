@@ -1,7 +1,7 @@
 /**
  * 🎬 AVITEC 360 BACKEND - PROCESAMIENTO DE VIDEOS
  * 
- * Versión 1.3.2 - Correcciones para móviles + eliminación de duplicación de overlays
+ * Versión 1.4.1 - Detección híbrida rápida (webapp + nativa compatibles)
  */
 
 const express = require('express');
@@ -224,9 +224,9 @@ class VideoProcessor {
     }
   }
 
-  // Nueva función para validar archivos de video
+  // Nueva función SIMPLIFICADA para validar archivos de video
   async validateVideoFile(videoPath) {
-    this.log(`🔍 Validando archivo de video: ${path.basename(videoPath)}`);
+    this.log(`🔍 Validando archivo de video (modo rápido): ${path.basename(videoPath)}`);
     
     try {
       // Verificar que el archivo existe y tiene tamaño > 0
@@ -243,26 +243,28 @@ class VideoProcessor {
       
       this.log(`📊 Tamaño del archivo: ${(stats.size / 1024 / 1024).toFixed(2)} MB`);
       
-      // Intentar leer información básica del video
+      // OPTIMIZACIÓN: Solo verificar que el archivo sea legible por FFmpeg
+      // Sin análisis detallado de metadata para máximo rendimiento
       try {
-        const videoInfo = await this.getVideoInfo(videoPath);
+        // Test rápido: intentar leer los primeros segundos
+        const testOutputPath = path.join(this.workingDir, 'test-frame.jpg');
+        const testCommand = ffmpeg(videoPath)
+          .inputOptions(['-t', '0.1'])  // Solo los primeros 0.1 segundos
+          .outputOptions(['-vf', 'scale=100:100', '-vframes', '1'])
+          .output(testOutputPath);
+          
+        await this.runCommandWithTimeout(testCommand, 'Validación Rápida');
         
-        // Validaciones básicas
-        if (!videoInfo.width || !videoInfo.height || videoInfo.width < 10 || videoInfo.height < 10) {
-          this.log('❌ Dimensiones de video inválidas');
-          return false;
+        // Si llegamos aquí, el video es válido
+        if (await fs.pathExists(testOutputPath)) {
+          await fs.remove(testOutputPath);
         }
         
-        if (!videoInfo.duration || videoInfo.duration < 0.1) {
-          this.log('❌ Duración de video inválida');
-          return false;
-        }
-        
-        this.log(`✅ Video válido: ${videoInfo.width}x${videoInfo.height}, ${videoInfo.duration.toFixed(2)}s`);
+        this.log(`✅ Video válido (verificación rápida exitosa)`);
         return true;
         
-      } catch (infoError) {
-        this.log(`❌ Error leyendo información del video: ${infoError.message}`);
+      } catch (testError) {
+        this.log(`❌ Video inválido o corrupto: ${testError.message}`);
         return false;
       }
       
@@ -273,123 +275,68 @@ class VideoProcessor {
   }
 
   async normalizeInputVideo(inputPath) {
-    this.log(`🔄 Normalizando video: ${path.basename(inputPath)}`);
+    this.log(`🔄 Normalizando video (DETECCIÓN HÍBRIDA RÁPIDA): ${path.basename(inputPath)}`);
     const outputPath = path.join(this.workingDir, 'input.mp4');
     
+    // ESTRATEGIA HÍBRIDA: Detección mínima solo para videos problemáticos de webapp
+    this.log(`⚡ MODO HÍBRIDO: Detección rápida + optimización de rendimiento`);
+    
     try {
-      // Detectar orientación del video primero con manejo de errores
-      let videoInfo;
-      try {
-        videoInfo = await this.getVideoInfo(inputPath);
-      } catch (infoError) {
-        this.log(`⚠️ No se pudo obtener info del video: ${infoError.message}`);
-        // Usar valores por defecto para continuar
-        videoInfo = {
-          width: 480,
-          height: 854,
-          rotation: 0,
-          fps: 24,
-          codec: 'unknown',
-          pixelFormat: 'yuv420p',
-          hasAudio: false
-        };
-      }
-      
-      this.log(`📐 Dimensiones originales: ${videoInfo.width}x${videoInfo.height}`);
-      this.log(`🔄 Rotación metadata: ${videoInfo.rotation}°`);
-      this.log(`📹 Codec: ${videoInfo.codec} | Pixel Format: ${videoInfo.pixelFormat} | Audio: ${videoInfo.hasAudio ? 'Sí' : 'No'}`);
-      
-      // ESTRATEGIA SIMPLIFICADA PARA MÓVILES PROBLEMÁTICOS
-      let videoFilter;
+      // PASO 1: Detección ultra-rápida solo de rotación crítica
       let needsRotation = false;
+      let rotationFilter = '';
       
-      // Determinar estrategia basada en dimensiones actuales y rotación
-      if (videoInfo.rotation === 90 || videoInfo.rotation === 270) {
-        this.log(`🎯 Video con rotación metadata ${videoInfo.rotation}° - aplicando corrección`);
-        needsRotation = true;
+      try {
+        // Usar ffprobe con timeout corto solo para metadata de rotación
+        const rotationInfo = await this.getQuickRotationInfo(inputPath);
         
-        if (videoInfo.rotation === 90) {
-          videoFilter = 'transpose=1'; // 90° horario
+        if (rotationInfo.needsRotation) {
+          needsRotation = true;
+          rotationFilter = rotationInfo.filter;
+          this.log(`🔧 Rotación detectada: ${rotationInfo.rotation}° - aplicando corrección`);
         } else {
-          videoFilter = 'transpose=2'; // 90° antihorario
+          this.log(`✅ Sin rotación necesaria - procesamiento directo`);
         }
         
-      } else if (videoInfo.width > videoInfo.height && videoInfo.rotation === 0) {
-        // Video horizontal real - necesita rotación
-        this.log(`🎯 Video horizontal (${videoInfo.width}x${videoInfo.height}) - rotando a vertical`);
-        needsRotation = true;
-        videoFilter = 'transpose=1';
-        
-      } else {
-        // Video ya en orientación correcta o incierto
-        this.log(`🎯 Video orientación OK (${videoInfo.width}x${videoInfo.height}) - solo escalado`);
+      } catch (detectionError) {
+        this.log(`⚠️ Detección falló: ${detectionError.message} - asumiendo sin rotación`);
         needsRotation = false;
       }
       
-      // Aplicar escalado después de rotación si es necesaria
-      const scaleFilter = 'scale=480:854:flags=lanczos:force_original_aspect_ratio=decrease,pad=480:854:(ow-iw)/2:(oh-ih)/2:color=black';
+      // PASO 2: Aplicar filtro optimizado según detección
+      const scaleFilter = 'scale=480:854:force_original_aspect_ratio=decrease,pad=480:854:(ow-iw)/2:(oh-ih)/2:color=black';
+      const videoFilter = needsRotation ? `${rotationFilter},${scaleFilter}` : scaleFilter;
       
-      if (needsRotation) {
-        videoFilter += ',' + scaleFilter;
-      } else {
-        videoFilter = scaleFilter;
-      }
-      
-      this.log(`🔧 Filtro aplicado: ${videoFilter}`);
-      
-      // Comando optimizado para móviles
       const command = ffmpeg(inputPath)
         .outputOptions([
           '-c:v', 'libx264',
-          '-preset', 'fast',      // Balance entre velocidad y calidad
-          '-crf', '30',           // Calidad ajustada para móviles
+          '-preset', 'veryfast',    // Mantenemos velocidad
+          '-crf', '32',             // Calidad optimizada
           '-vf', videoFilter,
-          '-r', '24',             // Frame rate fijo
-          '-an',                  // Sin audio en normalización
-          '-movflags', '+faststart',
-          '-metadata:s:v:0', 'rotate=0', // Limpiar metadata de rotación
-          '-avoid_negative_ts', 'make_zero' // Evitar timestamps negativos
+          '-r', '24',               // Frame rate fijo
+          '-an',                    // Sin audio en normalización
+          '-movflags', '+faststart'
         ])
         .output(outputPath);
         
-      await this.runCommandWithTimeout(command, 'Normalización');
+      this.log(`🚀 Filtro aplicado: ${videoFilter}`);
+      await this.runCommandWithTimeout(command, 'Normalización Híbrida');
       await fs.remove(inputPath);
       return outputPath;
       
     } catch (error) {
-      this.log(`❌ Error en normalización inteligente: ${error.message}`);
-      // Fallback: Usar autorotate de FFmpeg + escalado (SINTAXIS CORREGIDA)
-      this.log(`🔄 Usando fallback con autorotate`);
+      this.log(`❌ Error en normalización híbrida: ${error.message}`);
+      
+      // Fallback más robusto: usar autorotate de FFmpeg
+      this.log(`🔄 Usando fallback con autorotate (más robusto)`);
       
       try {
-        const command = ffmpeg(inputPath)
-          .inputOptions(['-autorotate', '1'])  // CORREGIDO: Mover autorotate a inputOptions
+        const fallbackCommand = ffmpeg(inputPath)
+          .inputOptions(['-autorotate', '1'])  // Autorotate en input
           .outputOptions([
             '-c:v', 'libx264',
-            '-preset', 'fast',  // Cambiado de veryfast a fast para mejor compatibilidad
-            '-crf', '32',       // Ajustado para balance calidad/velocidad
-            '-vf', 'scale=480:854:flags=lanczos:force_original_aspect_ratio=decrease,pad=480:854:(ow-iw)/2:(oh-ih)/2:color=black',
-            '-r', '24',             
-            '-an',
-            '-movflags', '+faststart',
-            '-metadata:s:v:0', 'rotate=0' // Limpiar metadata de rotación
-          ])
-          .output(outputPath);
-          
-        await this.runCommandWithTimeout(command, 'Normalización Fallback');
-        await fs.remove(inputPath);
-        return outputPath;
-        
-      } catch (fallbackError) {
-        this.log(`❌ Fallback también falló: ${fallbackError.message}`);
-        // Último recurso: Solo escalado básico sin autorotate
-        this.log(`🔄 Último recurso: escalado básico sin rotación`);
-        
-        const basicCommand = ffmpeg(inputPath)
-          .outputOptions([
-            '-c:v', 'libx264',
-            '-preset', 'fast',
-            '-crf', '28',
+            '-preset', 'fast',        // Preset más compatible
+            '-crf', '33',             // Balanceado
             '-vf', 'scale=480:854:force_original_aspect_ratio=decrease,pad=480:854:(ow-iw)/2:(oh-ih)/2:color=black',
             '-r', '24',
             '-an',
@@ -397,41 +344,45 @@ class VideoProcessor {
           ])
           .output(outputPath);
           
-        await this.runCommandWithTimeout(basicCommand, 'Escalado Básico');
+        await this.runCommandWithTimeout(fallbackCommand, 'Fallback Autorotate');
         await fs.remove(inputPath);
         return outputPath;
+        
+      } catch (fallbackError) {
+        this.log(`❌ Fallback autorotate falló: ${fallbackError.message}`);
+        throw new Error(`Normalización falló: ${fallbackError.message}`);
       }
     }
   }
 
-  // Función profesional para obtener información completa del video
-  async getVideoInfo(videoPath) {
+  // Función ultra-rápida para detectar SOLO rotación crítica
+  async getQuickRotationInfo(videoPath) {
     return new Promise((resolve, reject) => {
-      // Timeout para ffprobe también
-      const probeTimeout = setTimeout(() => {
-        reject(new Error('Timeout en ffprobe - archivo posiblemente corrupto'));
-      }, 30000); // 30 segundos para probe
+      // Timeout corto para análisis rápido
+      const quickTimeout = setTimeout(() => {
+        reject(new Error('Timeout en detección rápida'));
+      }, 10000); // Solo 10 segundos
       
       ffmpeg.ffprobe(videoPath, (err, metadata) => {
-        clearTimeout(probeTimeout);
+        clearTimeout(quickTimeout);
         
         if (err) {
-          this.log(`❌ Error en ffprobe: ${err.message}`);
+          this.log(`⚠️ Error en ffprobe rápido: ${err.message}`);
           reject(err);
           return;
         }
         
         const videoStream = metadata.streams.find(stream => stream.codec_type === 'video');
         if (!videoStream) {
-          reject(new Error('No se encontró stream de video'));
+          resolve({ needsRotation: false, rotation: 0, filter: '' });
           return;
         }
         
-        // DETECCIÓN PROFESIONAL DE ROTACIÓN CON MANEJO DE ERRORES
         let rotation = 0;
         
+        // DETECCIÓN RÁPIDA - Solo los casos más comunes
         try {
-          // Método 1: Tags de rotación directos
+          // Método 1: Tags directos (más común en webapp)
           if (videoStream.tags) {
             if (videoStream.tags.rotate) {
               rotation = parseInt(videoStream.tags.rotate) || 0;
@@ -440,74 +391,55 @@ class VideoProcessor {
             }
           }
           
-          // Método 2: Side data (Display Matrix) - más preciso para iOS
+          // Método 2: Display Matrix (iOS webkit)
           if (videoStream.side_data_list && rotation === 0) {
             const displayMatrix = videoStream.side_data_list.find(sd => 
-              sd.side_data_type === 'Display Matrix' || sd.side_data_type === 'Displaymatrix'
+              sd.side_data_type === 'Display Matrix'
             );
             
-            if (displayMatrix) {
-              if (displayMatrix.rotation !== undefined) {
-                rotation = Math.abs(parseInt(displayMatrix.rotation) || 0);
-              } else if (displayMatrix.displaymatrix && typeof displayMatrix.displaymatrix === 'string') {
-                // Parsear matrix manualmente si es necesario
-                const matrix = displayMatrix.displaymatrix;
-                if (matrix.includes('90')) rotation = 90;
-                else if (matrix.includes('180')) rotation = 180;  
-                else if (matrix.includes('270')) rotation = 270;
-              }
+            if (displayMatrix && displayMatrix.rotation !== undefined) {
+              rotation = Math.abs(parseInt(displayMatrix.rotation) || 0);
             }
           }
           
-          // Método 3: Metadata general del container
-          if (metadata.format && metadata.format.tags && rotation === 0) {
-            if (metadata.format.tags.rotate) {
-              rotation = parseInt(metadata.format.tags.rotate) || 0;
-            }
-          }
-          
-        } catch (rotationError) {
-          this.log(`⚠️ Error detectando rotación: ${rotationError.message}, usando 0°`);
+        } catch (rotError) {
+          this.log(`⚠️ Error en detección rápida: ${rotError.message}`);
           rotation = 0;
         }
         
-        // Normalizar valores de rotación
+        // Normalizar rotación
         rotation = rotation % 360;
         if (rotation < 0) rotation += 360;
         
-        // Manejo seguro de frame rate
-        let fps = 24; // Default fallback
-        try {
-          if (videoStream.r_frame_rate) {
-            fps = eval(videoStream.r_frame_rate) || 24; // Convertir fracción a decimal
-          } else if (videoStream.avg_frame_rate) {
-            fps = eval(videoStream.avg_frame_rate) || 24;
-          }
-          // Sanitizar fps extremos
-          if (fps > 60 || fps < 1) fps = 24;
-        } catch (fpsError) {
-          this.log(`⚠️ Error detectando FPS: ${fpsError.message}, usando 24fps`);
+        // Determinar si necesita rotación y qué filtro
+        let needsRotation = false;
+        let filter = '';
+        
+        if (rotation === 90) {
+          needsRotation = true;
+          filter = 'transpose=1'; // 90° horario
+          this.log(`🔄 Detectado: 90° horario - webapp iPhone típico`);
+        } else if (rotation === 270) {
+          needsRotation = true;
+          filter = 'transpose=2'; // 90° antihorario
+          this.log(`🔄 Detectado: 270° antihorario - webapp rotado`);
+        } else if (rotation === 180) {
+          needsRotation = true;
+          filter = 'transpose=2,transpose=2'; // 180°
+          this.log(`🔄 Detectado: 180° - video invertido`);
+        } else {
+          this.log(`✅ Sin rotación crítica detectada (${rotation}°)`);
         }
         
-        const result = {
-          width: videoStream.width || 480,
-          height: videoStream.height || 854,
-          duration: parseFloat(videoStream.duration) || 10,
-          fps: fps,
-          rotation: rotation,
-          codec: videoStream.codec_name || 'unknown',
-          pixelFormat: videoStream.pix_fmt || 'yuv420p',
-          // Información adicional para debugging
-          hasAudio: metadata.streams.some(s => s.codec_type === 'audio'),
-          containerFormat: metadata.format ? metadata.format.format_name : 'unknown'
-        };
-        
-        this.log(`📊 Video Info: ${result.width}x${result.height}, ${result.fps}fps, rot:${result.rotation}°, codec:${result.codec}, format:${result.containerFormat}`);
-        resolve(result);
+        resolve({
+          needsRotation,
+          rotation,
+          filter
+        });
       });
     });
   }
-  
+
   async createSpeedEffectSegments(inputVideoPath, normalDuration, slowmoDuration) {
     // Opciones SIMPLIFICADAS para evitar cuelgues
     const commonOptions = [
@@ -690,7 +622,7 @@ class OverlayGenerator {
 }
 
 // 🚀 RUTAS DE LA API
-app.get('/', (req, res) => res.json({ status: 'active', version: '1.3.2' }));
+app.get('/', (req, res) => res.json({ status: 'active', version: '1.4.1' }));
 
 app.post('/process-video', upload.fields([{ name: 'video', maxCount: 1 }, { name: 'overlay', maxCount: 1 }]), async (req, res) => {
   const processingId = uuidv4();

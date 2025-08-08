@@ -58,10 +58,10 @@ const DEFAULT_MUSIC_OPTIONS: MusicOption[] = [
 const FRAME_OPTIONS = [
   { id: "none", name: "Sin marco", thumbnail: null },
   { id: "custom", name: "Personalizado", thumbnail: null, isCustom: true },
-  { id: "classic", name: "Clásico", thumbnail: "/frames/classic-thumb.svg" },
-  { id: "modern", name: "Moderno", thumbnail: "/frames/modern-thumb.svg" },
-  { id: "elegant", name: "Elegante", thumbnail: "/frames/elegant-thumb.svg" },
-  { id: "fun", name: "Divertido", thumbnail: "/frames/fun-thumb.svg" },
+  { id: "elegante", name: "Elegante", thumbnail: "/frames/elegante.png" },
+  { id: "floral", name: "Floral", thumbnail: "/frames/floral.png" },
+  //{ id: "elegant", name: "Elegante", thumbnail: "/frames/elegant-thumb.svg" },
+  //{ id: "fun", name: "Divertido", thumbnail: "/frames/fun-thumb.svg" },
 ];
 
 // Colores predefinidos para el borde personalizado
@@ -264,6 +264,7 @@ export default function StyleSelection({ onContinue, onBack }: StyleSelectionPro
         {/* Vista previa */}
         <div className="bg-black rounded-2xl overflow-hidden shadow-2xl mb-6 relative">
           <div className="aspect-[9/16] relative">
+            {/* Video de fondo (capa 1 - más baja) */}
             <Image
               src="/placeholder-preview.png"
               alt="Vista previa"
@@ -271,10 +272,10 @@ export default function StyleSelection({ onContinue, onBack }: StyleSelectionPro
               className="object-cover"
             />
             
-            {/* Overlay del marco seleccionado */}
+            {/* Marco seleccionado (capa 2 - intermedia) */}
             {selectedFrame === "custom" && (
               <div 
-                className="absolute inset-4 rounded-2xl pointer-events-none"
+                className="absolute inset-4 rounded-2xl pointer-events-none z-10"
                 style={{
                   border: `4px solid ${customFrameColor}`,
                   boxShadow: `inset 0 0 0 2px ${customFrameColor}40, 0 0 20px ${customFrameColor}60`
@@ -289,14 +290,22 @@ export default function StyleSelection({ onContinue, onBack }: StyleSelectionPro
               </div>
             )}
             {selectedFrame !== "none" && selectedFrame !== "custom" && (
-              <div className="absolute inset-0 border-8 border-white/30 rounded-2xl pointer-events-none">
-                <div className="absolute inset-2 border-4 border-purple-400/50 rounded-xl"></div>
+              <div className="absolute inset-0 z-10 pointer-events-none">
+                <Image
+                  src={`/frames/${selectedFrame}.png`}
+                  alt={`Marco ${selectedFrame}`}
+                  fill
+                  className="object-contain"
+                  style={{
+                    mixBlendMode: 'normal'
+                  }}
+                />
               </div>
             )}
             
-            {/* Texto personalizado */}
+            {/* Texto personalizado (capa 3 - más alta) */}
             {customText && (
-              <div className="absolute bottom-4 left-4 right-4">
+              <div className="absolute bottom-4 left-4 right-4 z-20">
                 <p 
                   className="text-white text-center text-lg font-bold drop-shadow-lg bg-black/30 px-3 py-2 rounded-lg backdrop-blur-sm"
                   style={selectedFontStyle}
@@ -373,8 +382,16 @@ export default function StyleSelection({ onContinue, onBack }: StyleSelectionPro
                       <span>Personalizado</span>
                     </div>
                   ) : frame.thumbnail ? (
-                    <div className="w-full h-full bg-gray-600 flex items-center justify-center text-white text-xs">
-                      {frame.name}
+                    <div className="w-full h-full relative bg-gray-800">
+                      <Image
+                        src={frame.thumbnail}
+                        alt={frame.name}
+                        fill
+                        className="object-contain"
+                      />
+                      <div className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-xs p-1 text-center">
+                        {frame.name}
+                      </div>
                     </div>
                   ) : (
                     <div className="w-full h-full bg-white/10 flex items-center justify-center text-white/60 text-xs">

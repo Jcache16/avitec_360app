@@ -8,6 +8,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import Image from "next/image";
 import { StyleConfig } from "@/utils/VideoProcessor";
 
 interface RecordingScreenProps {
@@ -311,6 +312,47 @@ export default function RecordingScreen({
           )}
         </div>
 
+        {/* Marco durante procesamiento también */}
+        {recordingState === RecordingState.PROCESSING && styleConfig.frame && styleConfig.frame !== "none" && (
+          <div className="absolute inset-4 rounded-2xl pointer-events-none z-20 opacity-50">
+            {styleConfig.frame === "custom" && styleConfig.frameColor ? (
+              // Marco personalizado con color
+              <div 
+                className="w-full h-full rounded-2xl"
+                style={{
+                  border: `4px solid ${styleConfig.frameColor}`,
+                  boxShadow: `inset 0 0 0 2px ${styleConfig.frameColor}40, 0 0 20px ${styleConfig.frameColor}60`
+                }}
+              >
+                <div 
+                  className="absolute inset-2 rounded-xl w-full h-full"
+                  style={{
+                    border: `2px solid ${styleConfig.frameColor}80`
+                  }}
+                ></div>
+              </div>
+            ) : styleConfig.frame !== "custom" ? (
+              // Marco PNG predefinido
+              <div className="w-full h-full relative">
+                <Image
+                  src={`/frames/${styleConfig.frame}.png`}
+                  alt={`Marco ${styleConfig.frame}`}
+                  fill
+                  className="object-contain"
+                  style={{
+                    mixBlendMode: 'normal'
+                  }}
+                />
+              </div>
+            ) : (
+              // Fallback para marco genérico
+              <div className="w-full h-full rounded-2xl border-4 border-white/80 shadow-lg">
+                <div className="absolute inset-2 rounded-xl border-2 border-white/40"></div>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Barra de progreso durante grabación */}
         {recordingState === RecordingState.RECORDING && (
           <div className="px-6 mb-8">
@@ -352,6 +394,7 @@ export default function RecordingScreen({
       {recordingState === RecordingState.RECORDING && styleConfig.frame && styleConfig.frame !== "none" && (
         <div className="absolute inset-4 rounded-2xl pointer-events-none z-20">
           {styleConfig.frame === "custom" && styleConfig.frameColor ? (
+            // Marco personalizado con color
             <div 
               className="w-full h-full rounded-2xl"
               style={{
@@ -366,7 +409,21 @@ export default function RecordingScreen({
                 }}
               ></div>
             </div>
+          ) : styleConfig.frame !== "custom" ? (
+            // Marco PNG predefinido
+            <div className="w-full h-full relative">
+              <Image
+                src={`/frames/${styleConfig.frame}.png`}
+                alt={`Marco ${styleConfig.frame}`}
+                fill
+                className="object-contain"
+                style={{
+                  mixBlendMode: 'normal'
+                }}
+              />
+            </div>
           ) : (
+            // Fallback para marco genérico
             <div className="w-full h-full rounded-2xl border-4 border-white/80 shadow-lg">
               <div className="absolute inset-2 rounded-xl border-2 border-white/40"></div>
             </div>
@@ -377,6 +434,22 @@ export default function RecordingScreen({
       {/* Texto superpuesto durante grabación */}
       {recordingState === RecordingState.RECORDING && styleConfig.text && styleConfig.text.trim() && (
         <div className="absolute bottom-32 left-6 right-6 z-20">
+          <p 
+            className="text-white text-center text-2xl font-bold drop-shadow-lg bg-black/30 px-4 py-3 rounded-xl backdrop-blur-sm"
+            style={{
+              fontFamily: styleConfig.textFont === "playfair" ? "'Playfair Display', serif" :
+                         styleConfig.textFont === "chewy" ? "'Chewy', cursive" :
+                         "'Montserrat', sans-serif"
+            }}
+          >
+            {styleConfig.text}
+          </p>
+        </div>
+      )}
+
+      {/* Texto superpuesto durante procesamiento */}
+      {recordingState === RecordingState.PROCESSING && styleConfig.text && styleConfig.text.trim() && (
+        <div className="absolute bottom-32 left-6 right-6 z-20 opacity-50">
           <p 
             className="text-white text-center text-2xl font-bold drop-shadow-lg bg-black/30 px-4 py-3 rounded-xl backdrop-blur-sm"
             style={{
