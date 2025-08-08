@@ -139,36 +139,48 @@ export async function generateOverlayPNG(
         
         console.log('🔤 Fuente seleccionada:', fontFamily);
         
-        // Crear objeto de texto temporal para medir dimensiones
+        // Crear objeto de texto temporal para medir dimensiones (MISMO fontSize que el texto final)
+        const finalFontSize = 24;
         const tempTextObj = new Text(config.text, {
           fontFamily,
-          fontSize: 24,
+          fontSize: finalFontSize,
           fontWeight: "bold",
         });
         
         // Medir el texto real
         const textWidth = tempTextObj.width || 0;
-        const textHeight = tempTextObj.height || 32;
+        const textHeight = tempTextObj.height || finalFontSize;
         
         // Calcular dimensiones del fondo con padding proporcional
         const paddingX = Math.max(20, textWidth * 0.1); // 10% del ancho del texto como mínimo
-        const paddingY = 16;
+        const paddingY = 12;  // Reducido para mejor proporción con texto más pequeño
         const backgroundWidth = Math.min(textWidth + (paddingX * 2), width - 40); // Máximo ancho menos margen
         const backgroundHeight = textHeight + (paddingY * 2);
         
-        // Posición centrada
+        // Posición centrada del fondo
         const backgroundX = (width - backgroundWidth) / 2;
         const backgroundY = height - 80 - backgroundHeight / 2;
         
-        console.log('📐 Dimensiones calculadas:', { textWidth, backgroundWidth, backgroundHeight });
+        // Posición centrada del texto (RELATIVA al fondo)
+        const textX = width / 2;  // Centrado horizontalmente
+        const textY = backgroundY + (backgroundHeight / 2);  // Centrado en el fondo
         
-        // CORREGIDO: Fondo ajustado al contenido real
+        console.log('📐 Dimensiones calculadas:', { 
+          textWidth, 
+          textHeight, 
+          backgroundWidth, 
+          backgroundHeight,
+          backgroundY,
+          textY
+        });
+        
+        // CORREGIDO: Fondo ajustado al contenido real con opacidad similar al preview
         const textBg = new Rect({
           left: backgroundX,
           top: backgroundY,
           width: backgroundWidth,
           height: backgroundHeight,
-          fill: "rgba(0,0,0,0.7)", 
+          fill: "rgba(0,0,0,0.3)",  // CORREGIDO: 30% como en preview (era 70%)
           selectable: false, 
           rx: 12,
           ry: 12
@@ -176,10 +188,10 @@ export async function generateOverlayPNG(
         canvas.add(textBg);
 
         const textObj = new Text(config.text, {
-          left: width / 2,
-          top: height - 52,       // Ajustado de 71 a 52
+          left: textX,
+          top: textY,              // CORREGIDO: Centrado en relación al fondo
           fontFamily,             // Usar la fuente específica de Google Fonts
-          fontSize: 24,           // Reducido de 48 a 32
+          fontSize: finalFontSize, // CORREGIDO: Usar la misma variable
           fontWeight: "bold",
           fill: config.textColor || "#FFFFFF",
           // REMOVIDO: stroke y strokeWidth para coincidir con preview

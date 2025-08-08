@@ -130,7 +130,7 @@ export async function generateSimpleOverlayPNG(
         console.log('📝 Dibujando texto:', config.text);
         
         // Configurar fuente - USAR EXACTAMENTE LOS NOMBRES CARGADOS (sin fallbacks genéricos)
-        const fontSize = 32;  // Reducido de 48 a 32
+        const fontSize = 24;  // CORREGIDO: Cambiar de 32 a 24 para coincidir con OverlayGenerator
         const fontMap: Record<string, string> = {
           playfair: "'Playfair Display'",
           chewy: "'Chewy'",
@@ -152,18 +152,29 @@ export async function generateSimpleOverlayPNG(
         
         // Calcular dimensiones del fondo con padding proporcional
         const paddingX = Math.max(20, textWidth * 0.1); // 10% del ancho del texto como mínimo
-        const paddingY = 16;
+        const paddingY = 12;  // CORREGIDO: Reducido para mejor proporción con texto más pequeño
         const backgroundWidth = Math.min(textWidth + (paddingX * 2), width - 40); // Máximo ancho menos margen
         const backgroundHeight = textHeight + (paddingY * 2);
         
-        // Posición centrada
+        // Posición centrada del fondo
         const backgroundX = (width - backgroundWidth) / 2;
         const backgroundY = height - 80 - backgroundHeight / 2;
         
-        console.log('📐 Dimensiones calculadas (Canvas nativo):', { textWidth, backgroundWidth, backgroundHeight });
+        // Posición centrada del texto (RELATIVA al fondo)
+        const textX = width / 2;  // Centrado horizontalmente
+        const textY = backgroundY + (backgroundHeight / 2);  // Centrado en el fondo
         
-        // Fondo del texto ajustado al contenido real
-        ctx.fillStyle = "rgba(0,0,0,0.7)";
+        console.log('📐 Dimensiones calculadas (Canvas nativo):', { 
+          textWidth, 
+          textHeight,
+          backgroundWidth, 
+          backgroundHeight,
+          backgroundY,
+          textY
+        });
+        
+        // Fondo del texto ajustado al contenido real con opacidad similar al preview
+        ctx.fillStyle = "rgba(0,0,0,0.3)";  // CORREGIDO: 30% como en preview (era 70%)
         drawRoundedRect(ctx, backgroundX, backgroundY, backgroundWidth, backgroundHeight, 12);
         ctx.fill();
         
@@ -177,7 +188,7 @@ export async function generateSimpleOverlayPNG(
         
         // Fill del texto
         ctx.fillStyle = config.textColor || "#FFFFFF";
-        ctx.fillText(config.text, width / 2, height - 52);
+        ctx.fillText(config.text, textX, textY);  // CORREGIDO: Usar posición centrada en el fondo
         
         // Resetear sombra
         ctx.shadowColor = 'transparent';

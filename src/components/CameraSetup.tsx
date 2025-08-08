@@ -211,20 +211,20 @@ export default function CameraSetup({ onStartRecording, onBack }: CameraSetupPro
                 {/* Botones de opciones */}
                 <div className="space-y-3 w-full max-w-xs">
                   <button
+                    onClick={triggerFileSelect}
+                    className="w-full bg-gradient-to-r from-red-500 to-pink-500 backdrop-blur-sm text-white px-6 py-3 rounded-xl font-medium hover:from-red-600 hover:to-pink-600 transition-colors flex items-center justify-center gap-2"
+                  >
+                    <span className="text-lg">📸</span>
+                    <span>Grabar con la cámara del celular</span>
+                  </button>
+
+                  <button
                     onClick={() => requestCameraAccess()}
                     disabled={isLoading}
-                    className="w-full bg-gradient-to-r from-red-500 to-pink-500 text-white px-6 py-3 rounded-xl font-medium hover:from-red-600 hover:to-pink-600 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                    className="w-full bg-white/20 text-white px-6 py-3 rounded-xl font-medium hover:bg-white/30 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
                   >
-                    <span className="text-lg">📷</span>
-                    <span>{isLoading ? "Conectando..." : "Grabar en vivo"}</span>
-                  </button>
-                  
-                  <button
-                    onClick={triggerFileSelect}
-                    className="w-full bg-white/20 backdrop-blur-sm text-white px-6 py-3 rounded-xl font-medium hover:bg-white/30 transition-colors flex items-center justify-center gap-2"
-                  >
-                    <span className="text-lg">📁</span>
-                    <span>Elegir video existente</span>
+                    <span className="text-lg">🌐</span>
+                    <span>{isLoading ? "Conectando..." : "Grabar desde el navegador"}</span>
                   </button>
                 </div>
               </div>
