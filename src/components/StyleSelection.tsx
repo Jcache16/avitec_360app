@@ -81,9 +81,9 @@ const BORDER_COLORS = [
 ];
 
 const FONT_OPTIONS = [
-  { id: "playfair", name: "Playfair Display", className: "font-playfair", style: { fontFamily: "'Playfair Display', serif" } },
-  { id: "chewy", name: "Chewy", className: "font-chewy", style: { fontFamily: "'Chewy', cursive" } },
-  { id: "montserrat", name: "Montserrat", className: "font-montserrat", style: { fontFamily: "'Montserrat', sans-serif" } },
+  { id: "playfair", name: "Playfair Display", className: "font-playfair", style: { fontFamily: "'Playfair Display'" } },
+  { id: "chewy", name: "Chewy", className: "font-chewy", style: { fontFamily: "'Chewy'" } },
+  { id: "montserrat", name: "Montserrat", className: "font-montserrat", style: { fontFamily: "'Montserrat'" } },
 ];
 
 export default function StyleSelection({ onContinue, onBack }: StyleSelectionProps) {

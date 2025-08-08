@@ -1,6 +1,33 @@
 import { StyleConfig } from "@/utils/VideoProcessor";
 
 /**
+ * Verifica que las fuentes de Google Fonts estén cargadas
+ */
+async function ensureFontsLoaded(): Promise<void> {
+  const fontsToCheck = [
+    "'Playfair Display'",
+    "'Chewy'", 
+    "'Montserrat'"
+  ];
+
+  for (const font of fontsToCheck) {
+    try {
+      // Verificar si la fuente está disponible usando document.fonts API
+      if ('fonts' in document) {
+        await document.fonts.load(`16px ${font}`);
+        console.log(`✅ Fuente cargada (Canvas nativo): ${font}`);
+      }
+    } catch (error) {
+      console.warn(`⚠️ Error verificando fuente ${font}:`, error);
+    }
+  }
+  
+  // Esperar un poco más para asegurar la carga
+  await new Promise(resolve => setTimeout(resolve, 500));
+  console.log('✅ Verificación de fuentes completada (Canvas nativo)');
+}
+
+/**
  * Polyfill para roundRect si no está disponible
  */
 function drawRoundedRect(
@@ -37,6 +64,9 @@ export async function generateSimpleOverlayPNG(
   return new Promise(async (resolve, reject) => {
     try {
       console.log('🎨 Generando overlay simple con Canvas nativo');
+      
+      // ASEGURAR QUE LAS FUENTES ESTÉN CARGADAS ANTES DE GENERAR
+      await ensureFontsLoaded();
       
       // Crear canvas HTML
       const canvas = document.createElement('canvas');
@@ -99,23 +129,43 @@ export async function generateSimpleOverlayPNG(
       if (config.text && config.text.trim()) {
         console.log('📝 Dibujando texto:', config.text);
         
-        // Fondo del texto (proporciones ajustadas para 480x854)
-        ctx.fillStyle = "rgba(0,0,0,0.7)";
-        drawRoundedRect(ctx, width / 2 - 140, height - 80, 280, 56, 12);  // Ajustado
-        ctx.fill();
-        
-        // Configurar fuente
+        // Configurar fuente - USAR EXACTAMENTE LOS NOMBRES CARGADOS (sin fallbacks genéricos)
         const fontSize = 32;  // Reducido de 48 a 32
         const fontMap: Record<string, string> = {
-          playfair: "serif",
-          chewy: "cursive",
-          montserrat: "sans-serif",
+          playfair: "'Playfair Display'",
+          chewy: "'Chewy'",
+          montserrat: "'Montserrat'",
         };
-        const fontFamily = fontMap[config.textFont || "montserrat"] || "sans-serif";
+        const fontFamily = fontMap[config.textFont || "montserrat"] || "'Montserrat'";
         
+        console.log('🔤 Fuente seleccionada (Canvas nativo):', fontFamily);
+        
+        // Configurar fuente para medir
         ctx.font = `bold ${fontSize}px ${fontFamily}`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
+        
+        // Medir el texto real
+        const textMetrics = ctx.measureText(config.text);
+        const textWidth = textMetrics.width;
+        const textHeight = fontSize;
+        
+        // Calcular dimensiones del fondo con padding proporcional
+        const paddingX = Math.max(20, textWidth * 0.1); // 10% del ancho del texto como mínimo
+        const paddingY = 16;
+        const backgroundWidth = Math.min(textWidth + (paddingX * 2), width - 40); // Máximo ancho menos margen
+        const backgroundHeight = textHeight + (paddingY * 2);
+        
+        // Posición centrada
+        const backgroundX = (width - backgroundWidth) / 2;
+        const backgroundY = height - 80 - backgroundHeight / 2;
+        
+        console.log('📐 Dimensiones calculadas (Canvas nativo):', { textWidth, backgroundWidth, backgroundHeight });
+        
+        // Fondo del texto ajustado al contenido real
+        ctx.fillStyle = "rgba(0,0,0,0.7)";
+        drawRoundedRect(ctx, backgroundX, backgroundY, backgroundWidth, backgroundHeight, 12);
+        ctx.fill();
         
         // Sombra del texto
         ctx.shadowColor = 'rgba(0,0,0,0.8)';
@@ -123,10 +173,7 @@ export async function generateSimpleOverlayPNG(
         ctx.shadowOffsetX = 1.5;  // Reducido de 2 a 1.5
         ctx.shadowOffsetY = 1.5;
         
-        // Stroke del texto
-        ctx.strokeStyle = '#000000';
-        ctx.lineWidth = 1.5;  // Reducido de 3 a 1.5
-        ctx.strokeText(config.text, width / 2, height - 52);  // Ajustado de 71 a 52
+        // REMOVIDO: strokeText para coincidir con preview (solo sombra, sin borde)
         
         // Fill del texto
         ctx.fillStyle = config.textColor || "#FFFFFF";
@@ -137,6 +184,8 @@ export async function generateSimpleOverlayPNG(
         ctx.shadowBlur = 0;
         ctx.shadowOffsetX = 0;
         ctx.shadowOffsetY = 0;
+        
+        console.log('✅ Texto dibujado con fuente:', fontFamily);
       }
       
       // --- INDICADOR DE MÚSICA REMOVIDO ---

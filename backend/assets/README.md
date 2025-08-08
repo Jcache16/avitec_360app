@@ -1,41 +1,41 @@
-# 📁 Assets necesarios para el backend
+# 🎵 Assets del Backend
 
-Este directorio debe contener los archivos de música y fuentes que usa la aplicación.
+Este directorio contiene los assets necesarios para el procesamiento de videos en el backend.
 
-## 🎵 Música (assets/music/)
+## Estructura
+
+```
+assets/
+├── music/           # Archivos de música de fondo
+│   ├── *.mp3       # Pistas disponibles
+│   └── README.md   # Documentación de música
+└── README.md       # Este archivo
+```
+
+## ⚠️ Cambios en v1.5.0
+
+- **Fuentes eliminadas**: Las fuentes ahora se manejan en el frontend
+- **Marcos eliminados**: Los marcos PNG se procesan en el frontend  
+- **Overlays**: El backend ya no genera overlays, los recibe del frontend
+
+El backend ahora se enfoca únicamente en:
+1. 🎬 Procesamiento de video (velocidad, concatenación)
+2. 🎵 Aplicación de música
+3. 📱 Optimización para móviles
+
+Todos los elementos visuales (texto, fuentes, marcos) se generan en el frontend y se envían como overlay PNG al backend.
+
+## 🎵 Música Requerida
 
 Copiar los siguientes archivos desde `public/music/`:
-- `beggin.mp3`
-- `master_puppets.mp3` 
-- `night_dancer.mp3`
+- `SigueBailandome_Yannc.mp3`
+- `FeelSoClose_CalvinHarris.mp3`
+- `CrazyInLove_Beyonce.mp3`
+- `Extasis_CSanta.mp3`
+- `BlindingLights_TheWeeknd.mp3`
+- `DontStoptheParty_Pitbull.mp3`
 
-## 🔤 Fuentes (assets/fonts/)
-
-Copiar los siguientes archivos desde `public/fonts/`:
-- `Montserrat-Regular.ttf`
-- `PlayfairDisplay-Regular.ttf`
-- `Chewy-Regular.ttf`
-
-## 📋 Instrucciones
-
-1. **Copiar archivos manualmente:**
-   ```bash
-   # En el directorio del backend
-   cp ../public/music/*.mp3 assets/music/
-   cp ../public/fonts/*.ttf assets/fonts/
-   ```
-
-2. **Verificar estructura:**
-   ```
-   assets/
-   ├── music/
-   │   ├── beggin.mp3
-   │   ├── master_puppets.mp3
-   │   └── night_dancer.mp3
-   └── fonts/
-       ├── Montserrat-Regular.ttf
-       ├── PlayfairDisplay-Regular.ttf
-       └── Chewy-Regular.ttf
-   ```
-
-> **Nota:** Estos archivos son necesarios para que el backend funcione correctamente con todas las opciones de música y fuentes disponibles en la aplicación.
+```bash
+# Copiar música al backend
+cp ../public/music/*.mp3 assets/music/
+```

@@ -2,6 +2,33 @@ import { StaticCanvas, Rect, Text, Shadow, FabricImage } from 'fabric';
 import { StyleConfig } from "@/utils/VideoProcessor";
 
 /**
+ * Verifica que las fuentes de Google Fonts estén cargadas
+ */
+async function ensureFontsLoaded(): Promise<void> {
+  const fontsToCheck = [
+    "'Playfair Display'",
+    "'Chewy'", 
+    "'Montserrat'"
+  ];
+
+  for (const font of fontsToCheck) {
+    try {
+      // Verificar si la fuente está disponible usando document.fonts API
+      if ('fonts' in document) {
+        await document.fonts.load(`16px ${font}`);
+        console.log(`✅ Fuente cargada: ${font}`);
+      }
+    } catch (error) {
+      console.warn(`⚠️ Error verificando fuente ${font}:`, error);
+    }
+  }
+  
+  // Esperar un poco más para asegurar la carga
+  await new Promise(resolve => setTimeout(resolve, 500));
+  console.log('✅ Verificación de fuentes completada');
+}
+
+/**
  * Genera un PNG overlay robusto usando fabric.js v6.
  * OPTIMIZADO: Resolución 480x854 para compatibilidad con video procesado
  */
@@ -13,6 +40,9 @@ export async function generateOverlayPNG(
   return new Promise(async (resolve, reject) => {
     try {
       console.log('🎨 Generando overlay PNG con config:', config);
+      
+      // ASEGURAR QUE LAS FUENTES ESTÉN CARGADAS ANTES DE GENERAR
+      await ensureFontsLoaded();
       
       // Crear un canvas HTML temporal
       const canvasElement = document.createElement('canvas');
@@ -99,22 +129,48 @@ export async function generateOverlayPNG(
       if (config.text && config.text.trim()) {
         console.log('📝 Agregando texto:', config.text);
         
+        // Mapear fuentes usando exactamente los nombres cargados (sin fallbacks genéricos)
         const fontMap: Record<string, string> = {
-          playfair: "serif",
-          chewy: "cursive",
-          montserrat: "sans-serif",
+          playfair: "'Playfair Display'",
+          chewy: "'Chewy'", 
+          montserrat: "'Montserrat'",
         };
-        const fontFamily = fontMap[config.textFont || "montserrat"] || "sans-serif";
+        const fontFamily = fontMap[config.textFont || "montserrat"] || "'Montserrat'";
         
-        // CORREGIDO: Proporciones ajustadas para 480x854
+        console.log('🔤 Fuente seleccionada:', fontFamily);
+        
+        // Crear objeto de texto temporal para medir dimensiones
+        const tempTextObj = new Text(config.text, {
+          fontFamily,
+          fontSize: 24,
+          fontWeight: "bold",
+        });
+        
+        // Medir el texto real
+        const textWidth = tempTextObj.width || 0;
+        const textHeight = tempTextObj.height || 32;
+        
+        // Calcular dimensiones del fondo con padding proporcional
+        const paddingX = Math.max(20, textWidth * 0.1); // 10% del ancho del texto como mínimo
+        const paddingY = 16;
+        const backgroundWidth = Math.min(textWidth + (paddingX * 2), width - 40); // Máximo ancho menos margen
+        const backgroundHeight = textHeight + (paddingY * 2);
+        
+        // Posición centrada
+        const backgroundX = (width - backgroundWidth) / 2;
+        const backgroundY = height - 80 - backgroundHeight / 2;
+        
+        console.log('📐 Dimensiones calculadas:', { textWidth, backgroundWidth, backgroundHeight });
+        
+        // CORREGIDO: Fondo ajustado al contenido real
         const textBg = new Rect({
-          left: width / 2 - 140,  // Reducido de 200 a 140
-          top: height - 80,       // Reducido de 110 a 80
-          width: 280,             // Reducido de 400 a 280
-          height: 56,             // Reducido de 78 a 56
+          left: backgroundX,
+          top: backgroundY,
+          width: backgroundWidth,
+          height: backgroundHeight,
           fill: "rgba(0,0,0,0.7)", 
           selectable: false, 
-          rx: 12,                 // Reducido de 16 a 12
+          rx: 12,
           ry: 12
         });
         canvas.add(textBg);
@@ -122,12 +178,11 @@ export async function generateOverlayPNG(
         const textObj = new Text(config.text, {
           left: width / 2,
           top: height - 52,       // Ajustado de 71 a 52
-          fontFamily,
-          fontSize: 32,           // Reducido de 48 a 32
+          fontFamily,             // Usar la fuente específica de Google Fonts
+          fontSize: 24,           // Reducido de 48 a 32
           fontWeight: "bold",
           fill: config.textColor || "#FFFFFF",
-          stroke: "#000000",
-          strokeWidth: 1.5,       // Reducido de 2 a 1.5
+          // REMOVIDO: stroke y strokeWidth para coincidir con preview
           originX: "center",
           originY: "center",
           shadow: new Shadow({
@@ -139,6 +194,8 @@ export async function generateOverlayPNG(
           selectable: false
         });
         canvas.add(textObj);
+        
+        console.log('✅ Texto agregado con fuente:', fontFamily);
       }
 
       // --- INDICADOR DE MÚSICA REMOVIDO ---

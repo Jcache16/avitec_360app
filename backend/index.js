@@ -1,7 +1,7 @@
 /**
  * 🎬 AVITEC 360 BACKEND - PROCESAMIENTO DE VIDEOS
  * 
- * Versión 1.4.1 - Detección híbrida rápida (webapp + nativa compatibles)
+ * Versión 1.5.0 - Solo procesamiento de video (sin generación de overlays)
  */
 
 const express = require('express');
@@ -12,7 +12,6 @@ const path = require('path');
 const fs = require('fs-extra');
 const cors = require('cors');
 const { v4: uuidv4 } = require('uuid');
-const { createCanvas, loadImage, registerFont } = require('canvas');
 
 const app = express();
 
@@ -548,81 +547,8 @@ class VideoProcessor {
   }
 }
 
-// 🎨 Generador de Overlay (Clase completa sin omitir)
-class OverlayGenerator {
-  static async generateOverlayPNG(styleConfig) {
-    const width = 480;
-    const height = 854;
-    const canvas = createCanvas(width, height);
-    const ctx = canvas.getContext('2d');
-    ctx.clearRect(0, 0, width, height);
-
-    if (styleConfig.frame && styleConfig.frame !== 'none') {
-      await this.drawFrame(ctx, width, height, styleConfig);
-    }
-    if (styleConfig.text && styleConfig.text.trim()) {
-      await this.drawText(ctx, width, height, styleConfig);
-    }
-    // Indicador de música eliminado para reducir procesamiento
-    // if (styleConfig.music && styleConfig.music !== 'none') {
-    //   await this.drawMusicIndicator(ctx, width, height, styleConfig);
-    // }
-    return canvas.toBuffer('image/png');
-  }
-
-  static async drawFrame(ctx, width, height, styleConfig) {
-    if (styleConfig.frame === 'custom') {
-      const borderWidth = 20;
-      const color = styleConfig.frameColor || '#8B5CF6';
-      ctx.strokeStyle = color;
-      ctx.lineWidth = borderWidth;
-      ctx.strokeRect(borderWidth / 2, borderWidth / 2, width - borderWidth, height - borderWidth);
-    }
-  }
-
-  static async drawText(ctx, width, height, styleConfig) {
-    const text = styleConfig.text;
-    const color = styleConfig.textColor || '#FFFFFF';
-    const fontSize = Math.max(24, width * 0.05);
-    ctx.fillStyle = color;
-    ctx.font = `bold ${fontSize}px Arial`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.shadowColor = 'rgba(0, 0, 0, 0.7)';
-    ctx.shadowBlur = 10;
-    ctx.shadowOffsetX = 2;
-    ctx.shadowOffsetY = 2;
-    ctx.fillText(text, width / 2, height - 100);
-    ctx.shadowColor = 'transparent';
-    ctx.shadowBlur = 0;
-    ctx.shadowOffsetX = 0;
-    ctx.shadowOffsetY = 0;
-  }
-
-  static async drawMusicIndicator(ctx, width, height, styleConfig) {
-    // Función deshabilitada para reducir procesamiento
-    // El indicador de música ya no se muestra en el video
-    return;
-    
-    /*
-    const musicOption = MUSIC_OPTIONS.find(m => m.id === styleConfig.music);
-    if (!musicOption) return;
-    const size = 40;
-    const x = width - size - 20;
-    const y = 20;
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
-    ctx.fillRect(x - 10, y - 10, size + 20, size + 20);
-    ctx.fillStyle = '#FFFFFF';
-    ctx.font = `${size}px Arial`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('♪', x + size / 2, y + size / 2);
-    */
-  }
-}
-
 // 🚀 RUTAS DE LA API
-app.get('/', (req, res) => res.json({ status: 'active', version: '1.4.1' }));
+app.get('/', (req, res) => res.json({ status: 'active', version: '1.5.0' }));
 
 app.post('/process-video', upload.fields([{ name: 'video', maxCount: 1 }, { name: 'overlay', maxCount: 1 }]), async (req, res) => {
   const processingId = uuidv4();
@@ -646,25 +572,17 @@ app.post('/process-video', upload.fields([{ name: 'video', maxCount: 1 }, { name
 
     let overlayPath;
     if (req.files.overlay && req.files.overlay[0]) {
-      // USAR OVERLAY DEL FRONTEND (corregido)
+      // USAR OVERLAY DEL FRONTEND (preferido)
       overlayPath = req.files.overlay[0].path;
       console.log(`[${processingId}] 🎨 Usando overlay del frontend: ${(req.files.overlay[0].size / 1024).toFixed(2)} KB`);
     } else {
-      // SOLO generar overlay si NO viene del frontend
-      console.log(`[${processingId}] ⚠️ No se recibió overlay del frontend, generando en backend (fallback)`);
-      try {
-        const overlayBuffer = await OverlayGenerator.generateOverlayPNG(styleConfig);
-        overlayPath = path.join(__dirname, 'uploads', `overlay-${processingId}.png`);
-        await fs.writeFile(overlayPath, overlayBuffer);
-        console.log(`[${processingId}] 🎨 Overlay generado en backend como fallback`);
-      } catch (overlayError) {
-        console.error(`[${processingId}] ❌ Error generando overlay en backend: ${overlayError.message}`);
-        return res.status(500).json({ 
-          error: 'Error generando overlay', 
-          message: overlayError.message, 
-          processingId 
-        });
-      }
+      // ERROR: El overlay es requerido desde el frontend
+      console.log(`[${processingId}] ❌ No se recibió overlay del frontend - esto es requerido`);
+      return res.status(400).json({ 
+        error: 'Overlay PNG requerido desde el frontend', 
+        message: 'El frontend debe enviar el overlay generado',
+        processingId 
+      });
     }
 
     const processor = new VideoProcessor(processingId);
