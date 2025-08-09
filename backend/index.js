@@ -1,7 +1,7 @@
 /**
  * 🎬 AVITEC 360 BACKEND - PROCESAMIENTO DE VIDEOS
  * 
- * Versión 1.5.0 - Solo procesamiento de video (sin generación de overlays)
+ * Versión 1.6.0 - Pipeline de 1 pasada optimizado (sin generación de overlays)
  */
 
 // Cargar variables de entorno al inicio
@@ -76,7 +76,8 @@ class VideoProcessor {
     this.processingId = processingId || 'no-id';
     this.workingDir = path.join(__dirname, 'temp', uuidv4());
     this.outputDir = path.join(__dirname, 'processed');
-    this.ffmpegTimeout = 120 * 1000; // 120 segundos timeout para videos móviles complejos
+  // Permitir configurar por ENV; por defecto 240s para hardware limitado
+  this.ffmpegTimeout = parseInt(process.env.FFMPEG_TIMEOUT_MS || '240000');
   }
 
   log(message) {
@@ -195,21 +196,38 @@ class VideoProcessor {
       const originalInput = path.join(this.workingDir, `original-input${path.extname(videoPath)}`);
       await fs.copy(videoPath, originalInput);
 
-      // INTENTAR normalización, si falla usar original
-      let inputVideo;
+      // Detección rápida de rotación/aspecto para el pipeline de 1 pasada
+      let rotationInfo = { needsRotation: false, filter: '', needsCrop: false };
       try {
-        inputVideo = await this.normalizeInputVideo(originalInput);
-        this.log('✅ Normalización exitosa');
-      } catch (normError) {
-        this.log(`⚠️ Normalización falló: ${normError.message}`);
-        this.log('🔄 Usando video original sin normalizar');
-        inputVideo = originalInput;
+        rotationInfo = await this.getQuickRotationInfo(originalInput);
+      } catch (e) {
+        this.log(`⚠️ No se pudo obtener rotación/aspecto: ${e.message}`);
       }
 
-      const segmentsPaths = await this.createSpeedEffectSegments(inputVideo, normalDuration, slowmoDuration);
-      const concatenatedVideo = await this.concatenateSegments(segmentsPaths);
-      const styledVideo = await this.applyOverlayPNG(concatenatedVideo, overlayPath);
-      const finalVideo = await this.applyMusic(styledVideo, styleConfig);
+      // Pipeline optimizado de 1 pasada (fallback automático al flujo previo si falla)
+      let encodedOncePath;
+      try {
+        encodedOncePath = await this.singlePassProcess(originalInput, overlayPath, normalDuration, slowmoDuration, rotationInfo);
+        this.log('✅ Pipeline de 1 pasada completado');
+      } catch (spErr) {
+        this.log(`⚠️ Pipeline de 1 pasada falló: ${spErr.message} → usando flujo previo`);
+
+        let inputVideo;
+        try {
+          inputVideo = await this.normalizeInputVideo(originalInput);
+          this.log('✅ Normalización exitosa');
+        } catch (normError) {
+          this.log(`⚠️ Normalización falló: ${normError.message}`);
+          this.log('🔄 Usando video original sin normalizar');
+          inputVideo = originalInput;
+        }
+
+        const segmentsPaths = await this.createSpeedEffectSegments(inputVideo, normalDuration, slowmoDuration);
+        const concatenatedVideo = await this.concatenateSegments(segmentsPaths);
+        encodedOncePath = await this.applyOverlayPNG(concatenatedVideo, overlayPath);
+      }
+
+      const finalVideo = await this.applyMusic(encodedOncePath, styleConfig);
 
       const finalOutput = path.join(this.outputDir, `processed-${uuidv4()}.mp4`);
       await fs.move(finalVideo, finalOutput);
@@ -224,6 +242,95 @@ class VideoProcessor {
       await this.cleanup();
       throw error;
     }
+  }
+
+  // Pipeline de UNA pasada: escala/pad o crop → recorte por tiempo + slowmo → concat → overlay → encode H.264
+  async singlePassProcess(inputPath, overlaySourcePath, normalDuration, slowmoDuration, rotationInfo) {
+    this.log('⚡ Ejecutando pipeline de 1 pasada (filter_complex)');
+    const outputPath = path.join(this.workingDir, 'onepass.mp4');
+
+    // Copiar overlay localmente para rutas seguras
+    const overlayPath = path.join(this.workingDir, 'overlay.png');
+    await fs.copy(overlaySourcePath, overlayPath);
+
+    // Construir filtros de preproceso (rotación + escalado 720x1280 → pad o crop inteligente)
+    const baseScale = rotationInfo && rotationInfo.needsCrop
+      ? 'scale=960:1280:force_original_aspect_ratio=increase,crop=720:1280'
+      : 'scale=720:1280:force_original_aspect_ratio=decrease,pad=720:1280:(ow-iw)/2:(oh-ih)/2:color=black';
+    const rotate = rotationInfo && rotationInfo.needsRotation ? `${rotationInfo.filter},` : '';
+
+    // Calcular duraciones saneadas
+    const N = Math.max(0, Number(normalDuration) || 0);
+    const S = Math.max(0, Number(slowmoDuration) || 0);
+
+    // Filtros: preparar video base 720x1280 en [prep]
+    // Según N/S construir grafo evitando concat si no aplica
+    let filterGraph;
+    if (N > 0 && S > 0) {
+      filterGraph = [
+        `[0:v]${rotate}${baseScale},setpts=PTS[prep]`,
+        `[prep]split=2[s1][s2]`,
+        `[s1]trim=start=0:end=${N},setpts=PTS-STARTPTS[v1]`,
+        `[s2]trim=start=${N}:end=${N + S},setpts=2.0*(PTS-STARTPTS)[v2]`,
+        `[v1][v2]concat=n=2:v=1:a=0[base]`,
+        `[1:v]scale=720:1280:force_original_aspect_ratio=decrease,pad=720:1280:(ow-iw)/2:(oh-ih)/2[ovr]`,
+        `[base][ovr]overlay=0:0:format=auto:eval=init[vout]`
+      ].join(';');
+    } else if (N > 0) {
+      filterGraph = [
+        `[0:v]${rotate}${baseScale},setpts=PTS[prep]`,
+        `[prep]trim=start=0:end=${N},setpts=PTS-STARTPTS[base]`,
+        `[1:v]scale=720:1280:force_original_aspect_ratio=decrease,pad=720:1280:(ow-iw)/2:(oh-ih)/2[ovr]`,
+        `[base][ovr]overlay=0:0:format=auto:eval=init[vout]`
+      ].join(';');
+    } else if (S > 0) {
+      filterGraph = [
+        `[0:v]${rotate}${baseScale},setpts=PTS[prep]`,
+        `[prep]trim=start=0:end=${S},setpts=2.0*(PTS-STARTPTS)[base]`,
+        `[1:v]scale=720:1280:force_original_aspect_ratio=decrease,pad=720:1280:(ow-iw)/2:(oh-ih)/2[ovr]`,
+        `[base][ovr]overlay=0:0:format=auto:eval=init[vout]`
+      ].join(';');
+    } else {
+      // Si ambos son 0, producir 1s de video para evitar error
+      filterGraph = [
+        `[0:v]${rotate}${baseScale},trim=start=0:end=1,setpts=PTS-STARTPTS[base]`,
+        `[1:v]scale=720:1280:force_original_aspect_ratio=decrease,pad=720:1280:(ow-iw)/2:(oh-ih)/2[ovr]`,
+        `[base][ovr]overlay=0:0:format=auto:eval=init[vout]`
+      ].join(';');
+    }
+
+    // Opciones de codificación optimizadas para CPU mínima
+    const outputOpts = [
+      '-map', '[vout]',
+      '-c:v', 'libx264',
+      '-preset', process.env.X264_PRESET || 'ultrafast',
+      '-crf', process.env.X264_CRF || '30',
+      '-profile:v', process.env.X264_PROFILE || 'baseline',
+      '-level', '4.0',
+      '-pix_fmt', 'yuv420p',
+      '-r', '24',
+      '-g', '48',
+      '-movflags', '+faststart',
+      '-an',
+      '-threads', process.env.FFMPEG_THREADS || '1',
+      '-max_muxing_queue_size', '1024'
+    ];
+
+    // Construir comando
+    const totalRead = (N + S) > 0 ? (N + S) : 1;
+    const command = ffmpeg()
+      .input(inputPath)
+      .inputOptions(['-t', String(totalRead)])
+      .input(overlayPath)
+      .complexFilter(filterGraph)
+      .outputOptions(outputOpts)
+      .output(outputPath);
+
+    await this.runCommandWithTimeout(command, '1-Pasada');
+
+    // Limpiezas locales
+    if (await fs.pathExists(overlayPath)) await fs.remove(overlayPath);
+    return outputPath;
   }
 
   // Nueva función SIMPLIFICADA para validar archivos de video
@@ -280,40 +387,56 @@ class VideoProcessor {
     this.log(`🔄 Normalizando video (DETECCIÓN HÍBRIDA RÁPIDA): ${path.basename(inputPath)}`);
     const outputPath = path.join(this.workingDir, 'input.mp4');
     
-    // ESTRATEGIA HÍBRIDA: Detección mínima solo para videos problemáticos de webapp
-    this.log(`⚡ MODO HÍBRIDO: Detección rápida + optimización de rendimiento`);
+    // ESTRATEGIA HÍBRIDA: Detección mínima + crop inteligente + 720p vertical
+    this.log(`⚡ MODO HÍBRIDO: Detección rápida + optimización de aspecto en 720p`);
     
     try {
-      // PASO 1: Detección ultra-rápida solo de rotación crítica
+      // PASO 1: Detección ultra-rápida de rotación Y proporción
       let needsRotation = false;
       let rotationFilter = '';
+      let needsCrop = false;
       
       try {
-        // Usar ffprobe con timeout corto solo para metadata de rotación
-        const rotationInfo = await this.getQuickRotationInfo(inputPath);
+        // Usar ffprobe con timeout corto para metadata de rotación y aspecto
+        const videoInfo = await this.getQuickRotationInfo(inputPath);
         
-        if (rotationInfo.needsRotation) {
+        if (videoInfo.needsRotation) {
           needsRotation = true;
-          rotationFilter = rotationInfo.filter;
-          this.log(`🔧 Rotación detectada: ${rotationInfo.rotation}° - aplicando corrección`);
+          rotationFilter = videoInfo.filter;
+          this.log(`🔧 Rotación detectada: ${videoInfo.rotation}° - aplicando corrección`);
         } else {
           this.log(`✅ Sin rotación necesaria - procesamiento directo`);
         }
         
+        if (videoInfo.needsCrop) {
+          needsCrop = true;
+          this.log(`✂️ Video 4:3 detectado - aplicando crop inteligente`);
+        }
+        
       } catch (detectionError) {
-        this.log(`⚠️ Detección falló: ${detectionError.message} - asumiendo sin rotación`);
+        this.log(`⚠️ Detección falló: ${detectionError.message} - asumiendo sin rotación ni crop`);
         needsRotation = false;
+        needsCrop = false;
       }
       
-      // PASO 2: Aplicar filtro optimizado según detección
-      const scaleFilter = 'scale=480:854:force_original_aspect_ratio=decrease,pad=480:854:(ow-iw)/2:(oh-ih)/2:color=black';
+      // PASO 2: Aplicar filtro optimizado según detección (720p vertical)
+      let scaleFilter;
+      if (needsCrop) {
+        // Para videos 4:3: crop inteligente que llena el marco completo en 720p
+        scaleFilter = 'scale=960:1280:force_original_aspect_ratio=increase,crop=720:1280';
+        this.log(`📐 Usando crop inteligente para video 4:3 → escala a 960x1280 y corta a 720x1280 (720p)`);
+      } else {
+        // Para otros formatos: padding tradicional en 720p
+        scaleFilter = 'scale=720:1280:force_original_aspect_ratio=decrease,pad=720:1280:(ow-iw)/2:(oh-ih)/2:color=black';
+        this.log(`📐 Usando escalado con padding para preservar proporción en 720p (720x1280)`);
+      }
       const videoFilter = needsRotation ? `${rotationFilter},${scaleFilter}` : scaleFilter;
       
-      const command = ffmpeg(inputPath)
+    const command = ffmpeg(inputPath)
         .outputOptions([
           '-c:v', 'libx264',
-          '-preset', 'veryfast',    // Mantenemos velocidad
-          '-crf', '32',             // Calidad optimizada
+      '-preset', process.env.X264_PRESET || 'ultrafast',    // Máxima velocidad
+      '-crf', process.env.X264_CRF || '30',                 // Calidad vs tamaño
           '-vf', videoFilter,
           '-r', '24',               // Frame rate fijo
           '-an',                    // Sin audio en normalización
@@ -333,13 +456,13 @@ class VideoProcessor {
       this.log(`🔄 Usando fallback con autorotate (más robusto)`);
       
       try {
-        const fallbackCommand = ffmpeg(inputPath)
+    const fallbackCommand = ffmpeg(inputPath)
           .inputOptions(['-autorotate', '1'])  // Autorotate en input
           .outputOptions([
             '-c:v', 'libx264',
-            '-preset', 'fast',        // Preset más compatible
-            '-crf', '33',             // Balanceado
-            '-vf', 'scale=480:854:force_original_aspect_ratio=decrease,pad=480:854:(ow-iw)/2:(oh-ih)/2:color=black',
+      '-preset', process.env.X264_PRESET || 'ultrafast',
+      '-crf', process.env.X264_CRF || '30',
+            '-vf', 'scale=720:1280:force_original_aspect_ratio=decrease,pad=720:1280:(ow-iw)/2:(oh-ih)/2:color=black',
             '-r', '24',
             '-an',
             '-movflags', '+faststart'
@@ -357,7 +480,7 @@ class VideoProcessor {
     }
   }
 
-  // Función ultra-rápida para detectar SOLO rotación crítica
+  // Función ultra-rápida para detectar rotación crítica Y proporción de aspecto
   async getQuickRotationInfo(videoPath) {
     return new Promise((resolve, reject) => {
       // Timeout corto para análisis rápido
@@ -376,7 +499,7 @@ class VideoProcessor {
         
         const videoStream = metadata.streams.find(stream => stream.codec_type === 'video');
         if (!videoStream) {
-          resolve({ needsRotation: false, rotation: 0, filter: '' });
+          resolve({ needsRotation: false, rotation: 0, filter: '', aspectRatio: null, needsCrop: false });
           return;
         }
         
@@ -409,6 +532,27 @@ class VideoProcessor {
           rotation = 0;
         }
         
+        // DETECTAR PROPORCIÓN DE ASPECTO
+        const width = videoStream.width || 0;
+        const height = videoStream.height || 0;
+        let aspectRatio = null;
+        let needsCrop = false;
+        
+        if (width > 0 && height > 0) {
+          const ratio = width / height;
+          aspectRatio = ratio;
+          
+          // Detectar videos 4:3 (ratio ≈ 1.33) que necesitan crop para 9:16 vertical en 720p
+          if (Math.abs(ratio - (4/3)) < 0.1) { // 4:3 con tolerancia
+            needsCrop = true;
+            this.log(`📐 Video 4:3 detectado (${width}x${height}, ratio: ${ratio.toFixed(2)}) - aplicando crop inteligente a 720p`);
+          } else if (Math.abs(ratio - (3/4)) < 0.1) { // 3:4 (ya vertical)
+            this.log(`📐 Video 3:4 detectado (${width}x${height}, ratio: ${ratio.toFixed(2)}) - ya es vertical, escalando a 720p`);
+          } else {
+            this.log(`📐 Proporción detectada: ${width}x${height} (ratio: ${ratio.toFixed(2)}) - escalando a 720p`);
+          }
+        }
+        
         // Normalizar rotación
         rotation = rotation % 360;
         if (rotation < 0) rotation += 360;
@@ -436,19 +580,23 @@ class VideoProcessor {
         resolve({
           needsRotation,
           rotation,
-          filter
+          filter,
+          aspectRatio,
+          needsCrop,
+          width,
+          height
         });
       });
     });
   }
 
   async createSpeedEffectSegments(inputVideoPath, normalDuration, slowmoDuration) {
-    // Opciones SIMPLIFICADAS para evitar cuelgues
+    // Opciones optimizadas para 720p vertical
     const commonOptions = [
       '-c:v', 'libx264', 
-      '-preset', 'veryfast',    // MÁS RÁPIDO
-      '-crf', '35',             // Calidad más baja
-      '-s', '480x854',          // Forzar resolución
+      '-preset', process.env.X264_PRESET || 'ultrafast',
+      '-crf', process.env.X264_CRF || '30',
+      '-s', '720x1280',         // Resolución 720p vertical
       '-r', '24',               // Frame rate fijo
       '-an'                     // Sin audio
     ];
@@ -490,8 +638,21 @@ class VideoProcessor {
     const overlayPath = path.join(this.workingDir, 'overlay.png');
     await fs.copy(overlaySourcePath, overlayPath);
 
-    const command = ffmpeg(inputPath).input(overlayPath).complexFilter('[0:v][1:v]overlay=0:0:format=auto')
-      .outputOptions(['-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '30', '-profile:v', 'baseline', '-level', '3.0', '-pix_fmt', 'yuv420p', '-movflags', '+faststart'])
+    const command = ffmpeg(inputPath)
+      .input(overlayPath)
+      .complexFilter('[0:v][1:v]overlay=0:0:format=auto')
+      .outputOptions([
+        '-c:v', 'libx264',
+        '-preset', process.env.X264_PRESET || 'ultrafast',
+        '-crf', process.env.X264_CRF || '30',
+        '-profile:v', process.env.X264_PROFILE || 'baseline',
+        '-level', '4.0',
+        '-pix_fmt', 'yuv420p',
+        '-movflags', '+faststart',
+        '-r', '24',
+        '-g', '48',
+        '-threads', process.env.FFMPEG_THREADS || '1'
+      ])
       .output(outputPath);
     await this.runCommandWithTimeout(command, 'Aplicar Overlay');
     
@@ -551,7 +712,7 @@ class VideoProcessor {
 }
 
 // 🚀 RUTAS DE LA API
-app.get('/', (req, res) => res.json({ status: 'active', version: '1.5.0' }));
+app.get('/', (req, res) => res.json({ status: 'active', version: '1.6.0' }));
 
 app.post('/process-video', upload.fields([{ name: 'video', maxCount: 1 }, { name: 'overlay', maxCount: 1 }]), async (req, res) => {
   const processingId = uuidv4();
