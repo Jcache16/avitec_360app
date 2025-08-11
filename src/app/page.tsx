@@ -182,12 +182,12 @@ function WelcomeScreen({ onStartExperience }: { onStartExperience: () => void })
       <div className="relative z-10 text-center max-w-md mx-auto">
         {/* Logo/Icono de la app */}
         <div className="mb-8">
-          <div className="w-24 h-24 mx-auto bg-gradient-to-br from-purple-400 to-blue-500 rounded-full flex items-center justify-center shadow-2xl mb-4">
-            <div className="w-16 h-16 border-4 border-white rounded-full flex items-center justify-center">
-              <div className="w-8 h-8 bg-white rounded-full relative">
-                <div className="absolute inset-1 bg-gradient-to-br from-purple-500 to-blue-600 rounded-full"></div>
-              </div>
-            </div>
+          <div className="w-24 h-24 mx-auto mb-4">
+            <img 
+              src="/logo.svg" 
+              alt="AVI TEC 360° Studio Logo" 
+              className="w-full h-full"
+            />
           </div>
           <h1 className="text-3xl font-bold text-white mb-2 tracking-tight">
             AVI TEC 360° Studio
@@ -203,7 +203,7 @@ function WelcomeScreen({ onStartExperience }: { onStartExperience: () => void })
             </span>
           </h2>
           <p className="text-purple-100 text-lg leading-relaxed mb-6">
-            Graba videos únicos con efectos profesionales, slow motion y boomerang
+            Graba videos únicos con efectos profesionales en slow motion.
           </p>
           
           {/* Características destacadas */}

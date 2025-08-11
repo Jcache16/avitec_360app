@@ -619,16 +619,28 @@ export default function VideoPreview({
               <h3 className="text-white font-bold text-lg mb-3">
                 📱 ¡Video subido a la nube!
               </h3>
-              
-              <div className="bg-white p-4 rounded-xl mb-4 inline-block">
-                <QRCodeSVG 
-                  value={qrLink}
-                  size={150}
-                  level="M"
-                  includeMargin={true}
-                />
+              <div className="flex flex-col md:flex-row items-center justify-center gap-6 mb-4">
+                {/* QR del video individual */}
+                <div className="bg-white p-4 rounded-xl inline-block">
+                  <QRCodeSVG 
+                    value={qrLink}
+                    size={150}
+                    level="M"
+                    includeMargin={true}
+                  />
+                  <p className="text-xs text-gray-700 mt-2 font-semibold">QR del video</p>
+                </div>
+                {/* QR de la carpeta general */}
+                <div className="bg-white p-4 rounded-xl inline-block">
+                  <QRCodeSVG 
+                    value={driveUploadData.folderLink}
+                    size={150}
+                    level="M"
+                    includeMargin={true}
+                  />
+                  <p className="text-xs text-gray-700 mt-2 font-semibold">QR de la carpeta</p>
+                </div>
               </div>
-              
               <div className="space-y-2 text-sm">
                 <p className="text-white/80">
                   📅 <strong>Fecha:</strong> {driveUploadData.date}
@@ -637,10 +649,10 @@ export default function VideoPreview({
                   📁 <strong>Archivo:</strong> {driveUploadData.fileName}
                 </p>
                 <p className="text-white/60 text-xs">
-                  Escanea el código QR para acceder a todos los videos de hoy
+                  Escanea el QR del video para verlo directamente.<br />
+                  Escanea el QR de la carpeta para ver todos los videos del evento de hoy.
                 </p>
               </div>
-              
               <div className="flex gap-2 mt-4">
                 <button
                   onClick={() => window.open(driveUploadData.folderLink, '_blank')}

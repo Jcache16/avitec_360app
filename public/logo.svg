@@ -1,0 +1,26 @@
+<svg width="96" height="96" viewBox="0 0 96 96" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- Degradado exterior -->
+    <linearGradient id="gradOuter" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#C084FC" />
+      <stop offset="100%" stop-color="#3B82F6" />
+    </linearGradient>
+    <!-- Degradado interior -->
+    <linearGradient id="gradInner" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#A855F7" />
+      <stop offset="100%" stop-color="#2563EB" />
+    </linearGradient>
+  </defs>
+
+  <!-- Círculo exterior -->
+  <circle cx="48" cy="48" r="48" fill="url(#gradOuter)" />
+
+  <!-- Círculo con borde blanco -->
+  <circle cx="48" cy="48" r="32" fill="transparent" stroke="white" stroke-width="8" />
+
+  <!-- Círculo blanco sólido -->
+  <circle cx="48" cy="48" r="16" fill="white" />
+
+  <!-- Círculo interior degradado -->
+  <circle cx="48" cy="48" r="12" fill="url(#gradInner)" />
+</svg>

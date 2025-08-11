@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "AVI TEC 360 App Studio",
-  description: "Aplicación de estudio 360° para Photobooth",
+  title: "AVI TEC 360° Studio",
+  description: "Aplicación de estudio 360° para Photobooth de AVI TEC Cancún",
 };
 
 export default function RootLayout({
