@@ -246,8 +246,16 @@ export default function VideoPreview({
       const videoBlob = await response.blob();
       console.log('📦 Video blob obtenido:', {
         size: videoBlob.size,
-        type: videoBlob.type
+        type: videoBlob.type,
+        sizeMB: (videoBlob.size / (1024 * 1024)).toFixed(2)
       });
+      
+      // Pre-check del tamaño (límite sugerido: 50MB para móviles)
+      const maxSizeMB = 50;
+      const sizeMB = videoBlob.size / (1024 * 1024);
+      if (sizeMB > maxSizeMB) {
+        throw new Error(`El video es demasiado grande (${sizeMB.toFixed(1)}MB). En móviles el límite es ${maxSizeMB}MB. Intenta grabar un video más corto.`);
+      }
       
       // Paso 2: Crear FormData para enviar al backend OAuth
       const formData = new FormData();
@@ -340,6 +348,8 @@ export default function VideoPreview({
         alert('❌ Cuota excedida: El almacenamiento personal de Google Drive está lleno. Libere espacio e intente de nuevo.');
       } else if (errorMessage.includes('permisos') || errorMessage.includes('forbidden')) {
         alert('❌ Error de permisos: No hay permisos suficientes en Google Drive.');
+      } else if (errorMessage.includes('demasiado grande') || (uploadError instanceof Error && uploadError.message.includes('413'))) {
+        alert('❌ Video demasiado grande: Los videos en móviles suelen ser más pesados. Intenta grabar un video más corto o usar un navegador de escritorio.');
       } else {
         alert(`❌ Error OAuth: ${errorMessage}\n\nIntenta de nuevo en unos momentos.`);
       }
@@ -541,7 +551,7 @@ export default function VideoPreview({
             {/* Info del video */}
             <div className="mt-4 text-center">
               <p className="text-white/70 text-sm mb-2">
-                Duración: {normalDuration + slowmoDuration}s • Formato: 9:16 • Calidad: 480x854 (Móvil compatible)
+                Duración: {normalDuration + slowmoDuration}s • Formato: 9:16 • Calidad: 720p (Móvil compatible)
               </p>
               <div className="flex items-center justify-center gap-2 text-white/50 text-xs">
                 {styleConfig.music && styleConfig.music !== 'none' && (

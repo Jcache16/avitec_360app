@@ -7,6 +7,10 @@ import { NextRequest, NextResponse } from 'next/server';
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'https://avitec360-backend.onrender.com';
 
+// Configuración para permitir archivos grandes
+export const runtime = 'nodejs';
+export const maxDuration = 300; // 5 minutos timeout
+
 export async function POST(request: NextRequest) {
   console.log('🔄 [Proxy OAuth] Redirigiendo petición al backend...');
   console.log('🔗 [Proxy OAuth] Backend URL configurada:', BACKEND_URL);
@@ -77,6 +81,17 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(responseData, { status: 200 });
     } else {
       console.error('❌ [Proxy OAuth] Error del backend:', responseData);
+      
+      // Manejar específicamente error 413 (Payload Too Large)
+      if (backendResponse.status === 413) {
+        return NextResponse.json({
+          success: false,
+          error: 'El video es demasiado grande para subir. En móviles, los videos tienden a ser más grandes.',
+          details: 'Límite máximo: ~50MB. Intenta grabar un video más corto o usa un navegador de escritorio.',
+          statusCode: 413
+        }, { status: 413 });
+      }
+      
       return NextResponse.json(responseData, { status: backendResponse.status });
     }
     
