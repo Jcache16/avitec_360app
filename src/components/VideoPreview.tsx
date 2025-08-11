@@ -262,19 +262,52 @@ export default function VideoPreview({
       });
       
       if (!uploadResponse.ok) {
-        const errorData = await uploadResponse.json();
+        let errorMessage = `Error HTTP ${uploadResponse.status}: ${uploadResponse.statusText}`;
+        
+        try {
+          // Verificar si la respuesta es JSON antes de parsearla
+          const contentType = uploadResponse.headers.get('content-type');
+          if (contentType && contentType.includes('application/json')) {
+            const errorData = await uploadResponse.json();
+            errorMessage = errorData.error || errorData.message || errorMessage;
+          } else {
+            // Si no es JSON, leer como texto para debugging
+            const errorText = await uploadResponse.text();
+            console.error('❌ Respuesta no-JSON del servidor:', errorText.substring(0, 200));
+            errorMessage = `Servidor devolvió respuesta inválida (${uploadResponse.status})`;
+          }
+        } catch (parseError) {
+          console.error('❌ Error parseando respuesta del servidor:', parseError);
+          errorMessage = `Error de comunicación con el servidor (${uploadResponse.status})`;
+        }
         
         // Manejar errores específicos de OAuth
         if (uploadResponse.status === 401) {
           throw new Error('Token OAuth expirado. Contacte al administrador para renovar la autorización.');
         } else if (uploadResponse.status === 507) {
           throw new Error('Cuota de almacenamiento de Google Drive excedida. Libere espacio en su Drive personal.');
+        } else if (uploadResponse.status === 404) {
+          throw new Error('Endpoint de subida no encontrado. Verifique que el backend esté funcionando.');
+        } else if (uploadResponse.status >= 500) {
+          throw new Error('Error interno del servidor. Intente de nuevo en unos momentos.');
         } else {
-          throw new Error(errorData.error || 'Error subiendo a Google Drive');
+          throw new Error(errorMessage);
         }
       }
       
-      const uploadResult = await uploadResponse.json();
+      // Verificar que la respuesta exitosa también sea JSON válido
+      let uploadResult;
+      try {
+        const contentType = uploadResponse.headers.get('content-type');
+        if (!contentType || !contentType.includes('application/json')) {
+          throw new Error('Servidor devolvió respuesta no-JSON para operación exitosa');
+        }
+        uploadResult = await uploadResponse.json();
+      } catch (parseError) {
+        console.error('❌ Error parseando respuesta exitosa:', parseError);
+        throw new Error('Error procesando respuesta del servidor');
+      }
+      
       console.log('✅ Subida OAuth exitosa:', uploadResult);
       
       if (uploadResult.success && uploadResult.data) {

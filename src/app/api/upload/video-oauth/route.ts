@@ -9,12 +9,25 @@ const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'https://avitec360-ba
 
 export async function POST(request: NextRequest) {
   console.log('🔄 [Proxy OAuth] Redirigiendo petición al backend...');
+  console.log('🔗 [Proxy OAuth] Backend URL configurada:', BACKEND_URL);
+  
+  // Verificar que la URL del backend esté configurada
+  if (!BACKEND_URL || BACKEND_URL.includes('localhost')) {
+    console.warn('⚠️ [Proxy OAuth] URL del backend parece incorrecta:', BACKEND_URL);
+  }
   
   try {
     // Obtener el FormData del request original
     const formData = await request.formData();
     
-    console.log('📦 [Proxy OAuth] FormData obtenido, redirigiendo a:', `${BACKEND_URL}/api/upload/video-oauth`);
+    // Log para debugging
+    const video = formData.get('video') as File;
+    console.log('📦 [Proxy OAuth] FormData obtenido:', {
+      videoName: video?.name,
+      videoSize: video?.size,
+      videoType: video?.type,
+      backendUrl: `${BACKEND_URL}/api/upload/video-oauth`
+    });
     
     // Configurar timeout extendido para subidas grandes
     const controller = new AbortController();
@@ -32,8 +45,32 @@ export async function POST(request: NextRequest) {
     
     console.log(`📡 [Proxy OAuth] Respuesta del backend: ${backendResponse.status} ${backendResponse.statusText}`);
     
-    // Obtener la respuesta del backend
-    const responseData = await backendResponse.json();
+    // Verificar el tipo de contenido antes de parsear
+    const contentType = backendResponse.headers.get('content-type') || '';
+    let responseData;
+    
+    try {
+      if (contentType.includes('application/json')) {
+        responseData = await backendResponse.json();
+      } else {
+        // Si no es JSON, obtener como texto para debugging
+        const textResponse = await backendResponse.text();
+        console.error('❌ [Proxy OAuth] Respuesta no-JSON del backend:', textResponse.substring(0, 500));
+        
+        responseData = {
+          success: false,
+          error: `Backend devolvió respuesta inválida (${backendResponse.status}): ${backendResponse.statusText}`,
+          details: process.env.NODE_ENV === 'development' ? textResponse.substring(0, 200) : 'Respuesta no-JSON del servidor'
+        };
+      }
+    } catch (parseError) {
+      console.error('❌ [Proxy OAuth] Error parseando respuesta:', parseError);
+      responseData = {
+        success: false,
+        error: `Error procesando respuesta del backend (${backendResponse.status})`,
+        details: process.env.NODE_ENV === 'development' ? parseError : undefined
+      };
+    }
     
     if (backendResponse.ok) {
       console.log('✅ [Proxy OAuth] Subida exitosa');
