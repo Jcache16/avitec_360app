@@ -131,7 +131,7 @@ export const processVideoInBackend = async (
       try {
         const errorData = await response.json();
         errorMessage = errorData.message || errorMessage;
-      } catch (parseError) {
+      } catch {
         console.warn('No se pudo parsear error del servidor');
       }
       throw new Error(errorMessage);
@@ -296,12 +296,14 @@ export const getBackendOptions = async () => {
   }
 };
 
-export default {
+const BackendService = {
   processVideoHybrid,
   processVideoInBackend,
   checkBackendHealth,
   getBackendOptions
 };
+
+export default BackendService;
 
 /**
  * 🔍 Verificar si un video ya fue procesado (para casos de timeout)

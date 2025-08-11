@@ -34,7 +34,6 @@ export default function Home() {
   const [slowmoDuration, setSlowmoDuration] = useState<number>(7);
   const [selectedFacingMode, setSelectedFacingMode] = useState<string>("user");
   const [videoBlob, setVideoBlob] = useState<Blob | null>(null);
-  const [selectedVideoFile, setSelectedVideoFile] = useState<File | null>(null);
 
   const handleStyleConfigured = (config: StyleConfig, overlayPNG: Blob) => {
     console.log('📋 handleStyleConfigured llamado con:', {
@@ -72,7 +71,6 @@ export default function Home() {
     setNormalDuration(normalDur);
     setSlowmoDuration(slowmoDur);
     setSelectedFacingMode(facingMode);
-    setSelectedVideoFile(selectedFile || null);
     
     // Si se seleccionó un archivo, vamos directamente al preview
     // Si no, vamos a la pantalla de grabación
@@ -88,7 +86,6 @@ export default function Home() {
   const handleRestartExperience = () => {
     setStyleConfig(null);
     setVideoBlob(null);
-    setSelectedVideoFile(null);
     setNormalDuration(8);
     setSlowmoDuration(7);
     setSelectedFacingMode("user");

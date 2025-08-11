@@ -34,19 +34,8 @@ export async function POST(request: NextRequest) {
     
     console.log('🎯 Enviando al backend:', uploadEndpoint);
     
-    // Crear FormData para enviar al backend
-    const backendFormData = new FormData();
-    
-    // Primero, necesitamos "simular" que el archivo ya está en el servidor
-    // En un escenario real, necesitaríamos:
-    // 1. Guardar temporalmente el archivo en el servidor Next.js
-    // 2. Pasarle la ruta al backend
-    // 
-    // Para simplificar, vamos a usar un enfoque diferente:
-    // Enviar directamente el blob al backend
-    
+    // Crear el array buffer directamente para envío
     const arrayBuffer = await videoFile.arrayBuffer();
-    const videoBlob = new Blob([arrayBuffer], { type: videoFile.type });
     
     // Crear un objeto con los datos necesarios
     const uploadData = {

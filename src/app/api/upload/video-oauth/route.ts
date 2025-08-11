@@ -36,7 +36,7 @@ export async function POST(request: NextRequest) {
         'Content-Type': request.headers.get('Content-Type') || 'multipart/form-data',
       },
       signal: controller.signal,
-      // @ts-ignore - duplex is needed for streaming body
+      // @ts-expect-error - duplex is needed for streaming body but not in TypeScript fetch types
       duplex: 'half',
     });
     
