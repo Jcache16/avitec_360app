@@ -21,28 +21,23 @@ export async function POST(request: NextRequest) {
   }
   
   try {
-    // Obtener el FormData del request original
-    const formData = await request.formData();
-    
-    // Log para debugging
-    const video = formData.get('video') as File;
-    console.log('📦 [Proxy OAuth] FormData obtenido:', {
-      videoName: video?.name,
-      videoSize: video?.size,
-      videoType: video?.type,
-      backendUrl: `${BACKEND_URL}/api/upload/video-oauth`
-    });
+    // En lugar de procesar FormData, hacer streaming directo del body
+    console.log('📦 [Proxy OAuth] Haciendo streaming directo del body al backend...');
     
     // Configurar timeout extendido para subidas grandes
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 minutos timeout
     
-    // Hacer la petición al backend real
+    // Hacer streaming directo del request body al backend
     const backendResponse = await fetch(`${BACKEND_URL}/api/upload/video-oauth`, {
       method: 'POST',
-      body: formData,
+      body: request.body,
+      headers: {
+        'Content-Type': request.headers.get('Content-Type') || 'multipart/form-data',
+      },
       signal: controller.signal,
-      // No establecer Content-Type aquí, fetch lo hará automáticamente para FormData
+      // @ts-ignore - duplex is needed for streaming body
+      duplex: 'half',
     });
     
     clearTimeout(timeoutId);

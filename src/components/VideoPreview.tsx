@@ -250,13 +250,6 @@ export default function VideoPreview({
         sizeMB: (videoBlob.size / (1024 * 1024)).toFixed(2)
       });
       
-      // Pre-check del tamaño (límite sugerido: 50MB para móviles)
-      const maxSizeMB = 50;
-      const sizeMB = videoBlob.size / (1024 * 1024);
-      if (sizeMB > maxSizeMB) {
-        throw new Error(`El video es demasiado grande (${sizeMB.toFixed(1)}MB). En móviles el límite es ${maxSizeMB}MB. Intenta grabar un video más corto.`);
-      }
-      
       // Paso 2: Crear FormData para enviar al backend OAuth
       const formData = new FormData();
       const fileName = `avitec-360-${Date.now()}.mp4`;
