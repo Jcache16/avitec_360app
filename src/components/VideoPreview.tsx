@@ -10,7 +10,7 @@
 import { useState, useEffect, useRef } from "react";
 import { StyleConfig, ProcessingProgress } from "@/utils/VideoProcessor";
 import { processVideoHybrid } from "@/utils/BackendService";
-import { directResumableUploadService } from "@/utils/DirectResumableUploadService";
+import { offlineResumableUploadService } from "@/utils/OfflineResumableUploadService";
 import { QRCodeSVG } from 'qrcode.react';
 
 interface VideoPreviewProps {
@@ -259,10 +259,10 @@ export default function VideoPreview({
       
       const fileName = `avitec-360-${Date.now()}.mp4`;
       
-      // Paso 2: Subir usando el servicio directo (sin verificación problemática)
+      // Paso 2: Subir usando el servicio offline (SIN verificación)
       setUploadStep("Creando sesión de subida...");
       
-      const result = await directResumableUploadService.uploadFile(
+      const result = await offlineResumableUploadService.uploadFile(
         videoBlob,
         fileName,
         (progress: { uploadedBytes: number; totalBytes: number; percentage: number; status: string }) => {
