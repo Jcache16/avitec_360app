@@ -281,7 +281,15 @@ export default function VideoPreview({
       };
 
       // Enviar con reintentos por chunk
-      let finalResult: any = null;
+      type UploadResult = {
+        success: boolean;
+        data?: {
+          links: { folder: string; view: string; download: string };
+          fileName: string;
+          date: string;
+        };
+      };
+      let finalResult: UploadResult | null = null;
       for (let i = 0; i < totalChunks; i++) {
         let attempt = 0;
         let ok = false;
@@ -294,7 +302,7 @@ export default function VideoPreview({
               throw new Error(`Chunk ${i} HTTP ${resp.status}: ${text.substring(0, 120)}`);
             }
             const ct = resp.headers.get('content-type') || '';
-            const data = ct.includes('application/json') ? await resp.json() : { success: true };
+            const data: UploadResult = ct.includes('application/json') ? await resp.json() : { success: true };
             // Último chunk debería retornar objeto final
             if (i === totalChunks - 1) {
               finalResult = data;
@@ -323,15 +331,16 @@ export default function VideoPreview({
 
       console.log('✅ Subida OAuth exitosa (chunks):', finalResult);
 
-      if (finalResult.success && finalResult.data) {
+      if (finalResult && finalResult.success && finalResult.data) {
+        const { links, fileName: upFileName, date } = finalResult.data;
         setDriveUploadData({
-          folderLink: finalResult.data.links.folder,
-          fileLink: finalResult.data.links.view,
-          fileName: finalResult.data.fileName,
-          date: finalResult.data.date
+          folderLink: links.folder,
+          fileLink: links.view,
+          fileName: upFileName,
+          date
         });
-        setQrLink(finalResult.data.links.view);
-        alert(`¡Video subido exitosamente con OAuth!\n\nCarpeta: ${finalResult.data.date}\nArchivo: ${finalResult.data.fileName}\n\n✅ Carga en chunks`);
+        setQrLink(links.view);
+        alert(`¡Video subido exitosamente con OAuth!\n\nCarpeta: ${date}\nArchivo: ${upFileName}\n\n✅ Carga en chunks`);
       } else {
         throw new Error('Respuesta inesperada del servidor OAuth (chunks)');
       }

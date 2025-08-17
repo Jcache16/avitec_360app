@@ -43,15 +43,11 @@ export async function POST(request: NextRequest) {
     clearTimeout(timeoutId);
 
     const contentType = backendResponse.headers.get('content-type') || '';
-    let data: any;
-    if (contentType.includes('application/json')) {
-      data = await backendResponse.json();
-    } else {
-      const text = await backendResponse.text();
-      data = { success: backendResponse.ok, message: text };
-    }
+    const payload: unknown = contentType.includes('application/json')
+      ? await backendResponse.json()
+      : { success: backendResponse.ok, message: await backendResponse.text() };
 
-    return NextResponse.json(data, { status: backendResponse.status });
+    return NextResponse.json(payload, { status: backendResponse.status });
   } catch (error) {
     console.error('❌ [Proxy OAuth CHUNK] Error en proxy:', error);
     const isAbort = error instanceof Error && error.name === 'AbortError';
