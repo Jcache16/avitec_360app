@@ -10,7 +10,7 @@
 import { useState, useEffect, useRef } from "react";
 import { StyleConfig, ProcessingProgress } from "@/utils/VideoProcessor";
 import { processVideoHybrid } from "@/utils/BackendService";
-import { resumableUploadService } from "@/utils/ResumableUploadService";
+import { directResumableUploadService } from "@/utils/DirectResumableUploadService";
 import { QRCodeSVG } from 'qrcode.react';
 
 interface VideoPreviewProps {
@@ -259,13 +259,13 @@ export default function VideoPreview({
       
       const fileName = `avitec-360-${Date.now()}.mp4`;
       
-      // Paso 2: Subir usando el servicio de subidas resumables
+      // Paso 2: Subir usando el servicio directo (sin verificación problemática)
       setUploadStep("Creando sesión de subida...");
       
-      const result = await resumableUploadService.uploadFile(
+      const result = await directResumableUploadService.uploadFile(
         videoBlob,
         fileName,
-        (progress) => {
+        (progress: { uploadedBytes: number; totalBytes: number; percentage: number; status: string }) => {
           setUploadProgress(progress.percentage);
           setUploadStep(`Subiendo directamente a Drive... ${progress.percentage}%`);
           console.log(`📊 Progreso: ${progress.percentage}% (${(progress.uploadedBytes / 1024 / 1024).toFixed(2)} MB)`);
@@ -285,19 +285,12 @@ export default function VideoPreview({
         setQrLink(links.view);
         setUploadStep("¡Subida completada!");
         
-        alert(`¡Video subido exitosamente!\n\nCarpeta: ${date}\nArchivo: ${uploadedFileName}\n\n✅ Subida resumable directa`);
+        alert(`¡Video subido exitosamente!\n\nCarpeta: ${date}\nArchivo: ${uploadedFileName}\n\n✅ Subida directa sin verificación`);
       } else {
-        // Error pero posiblemente subido
+        // Error real en la subida
         const errorMsg = result.error || 'Error desconocido en la subida';
-        console.warn('⚠️ Error en subida, pero archivo podría estar subido:', errorMsg);
-        
-        if (errorMsg.includes('verifique Google Drive') || errorMsg.includes('archivo podría haberse subido')) {
-          // El archivo probablemente se subió, solo falló la verificación
-          alert(`⚠️ Posible subida exitosa con error de verificación\n\n${errorMsg}\n\nPor favor verifique Google Drive para confirmar que el video se subió.`);
-          setUploadStep("Subida completada - verificar Drive");
-        } else {
-          throw new Error(errorMsg);
-        }
+        console.error('❌ Error real en subida:', errorMsg);
+        throw new Error(errorMsg);
       }
       
     } catch (uploadError) {
@@ -576,7 +569,7 @@ export default function VideoPreview({
             ) : (
               <>
                 <span className="text-xl">☁️</span>
-                <span>Subir a Google Drive (Resumable)</span>
+                <span>Subir a Google Drive (Directo)</span>
               </>
             )}
           </button>

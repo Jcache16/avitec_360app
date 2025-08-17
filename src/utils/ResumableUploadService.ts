@@ -171,7 +171,7 @@ export class ResumableUploadService {
     endByte: number,
     totalSize: number,
     chunkIndex: number,
-    totalChunks: number
+    _totalChunks: number // Prefijo con _ para indicar que no se usa
   ): Promise<boolean> {
     for (let attempt = 1; attempt <= this.MAX_RETRIES; attempt++) {
       try {
