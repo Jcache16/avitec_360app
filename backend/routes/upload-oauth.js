@@ -8,6 +8,7 @@ const { ensureDateFolder, uploadVideoToDrive, getFolderPublicLink } = require('.
 const { 
   createResumableUploadSession, 
   checkUploadStatus, 
+  findRecentUploadedFile,
   generateUploadLinks 
 } = require('../services/driveResumableUpload');
 
@@ -281,7 +282,32 @@ router.post('/verify-upload', async (req, res) => {
         message: 'Subida completada exitosamente',
         data: links
       });
-    } else {
+    } else if (status.status === 'session_expired' || status.status === 'network_error') {
+      console.log('⚠️ Sesión expirada o error de red - buscando archivo...');
+      
+      // Intentar encontrar el archivo recién subido
+      const fileId = await findRecentUploadedFile(fileName, folderId);
+      
+      if (fileId) {
+        console.log('✅ Archivo encontrado después de sesión expirada');
+        
+        const links = generateUploadLinks(fileId, folderId, fileName, date);
+        
+        res.json({
+          success: true,
+          message: 'Subida completada exitosamente (archivo encontrado después de error de sesión)',
+          data: links
+        });
+      } else {
+        console.log('❌ No se pudo encontrar el archivo');
+        
+        res.status(500).json({
+          success: false,
+          error: 'Error de red en verificación. El archivo podría haberse subido - verifique Google Drive manualmente',
+          details: 'Sesión expirada y archivo no encontrado automáticamente'
+        });
+      }
+    } else if (status.status === 'incomplete') {
       console.log(`📊 Subida incompleta: ${status.uploadedBytes || 0} bytes`);
       
       res.json({
@@ -290,6 +316,14 @@ router.post('/verify-upload', async (req, res) => {
         uploadedBytes: status.uploadedBytes || 0,
         message: 'Subida aún en progreso'
       });
+    } else {
+      console.log('❌ Error en verificación:', status.error || status.message);
+      
+      res.status(500).json({
+        success: false,
+        error: 'Error verificando estado de subida',
+        details: status.error || status.message
+      });
     }
     
   } catch (error) {
@@ -297,7 +331,7 @@ router.post('/verify-upload', async (req, res) => {
     
     res.status(500).json({
       success: false,
-      error: 'Error verificando estado de subida',
+      error: 'Error interno verificando estado de subida',
       details: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }

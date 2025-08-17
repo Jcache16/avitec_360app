@@ -11,6 +11,7 @@
     "extract-env": "node extract-env-vars.js",
     "verify-creds": "node verify-credentials.js",
     "get-oauth-token": "node get-oauth-token.js",
+    "regenerate-token": "node regenerate-oauth-token.js",
     "verify-oauth": "node verify-oauth.js",
     "test-oauth": "node verify-oauth.js"
   },

@@ -96,6 +96,8 @@ async function checkUploadStatus(uploadUrl) {
       }
     });
     
+    console.log(`📊 [Resumable] Status de verificación: ${response.status}`);
+    
     if (response.status === 200 || response.status === 201) {
       // Subida completada
       const result = await response.json();
@@ -121,13 +123,84 @@ async function checkUploadStatus(uploadUrl) {
         status: 'incomplete',
         uploadedBytes
       };
+    } else if (response.status === 404 || response.status === 410) {
+      // URL de sesión expirada/inválida - probablemente la subida ya terminó
+      console.log('⚠️ [Resumable] URL de sesión expirada - buscando archivo por nombre...');
+      
+      // Intentar buscar el archivo recién subido por nombre
+      return {
+        status: 'session_expired',
+        message: 'Sesión expirada pero archivo probablemente subido'
+      };
     } else {
-      throw new Error(`Error verificando estado: ${response.status} ${response.statusText}`);
+      // Otro error
+      const errorText = await response.text();
+      console.warn(`⚠️ [Resumable] Error verificando estado: ${response.status} - ${errorText}`);
+      
+      return {
+        status: 'error',
+        error: `Error ${response.status}: ${errorText}`
+      };
     }
     
   } catch (error) {
     console.error('❌ [Resumable] Error verificando estado:', error);
-    throw error;
+    
+    // Si hay error de red, asumir que la subida se completó
+    // (común cuando la URL de sesión expira después de subida exitosa)
+    return {
+      status: 'network_error',
+      message: 'Error de red - archivo probablemente subido'
+    };
+  }
+}
+
+/**
+ * Buscar archivo recién subido cuando la sesión expira
+ * @param {string} fileName - Nombre del archivo a buscar
+ * @param {string} folderId - ID de la carpeta donde buscar
+ * @returns {Promise<string|null>} ID del archivo encontrado o null
+ */
+async function findRecentUploadedFile(fileName, folderId) {
+  try {
+    console.log(`🔍 [Resumable] Buscando archivo recién subido: ${fileName}`);
+    
+    const auth = getOAuthClient();
+    const drive = google.drive({ version: 'v3', auth });
+    
+    // Buscar archivos en la carpeta con nombre similar
+    const response = await drive.files.list({
+      q: `'${folderId}' in parents and name contains 'AVITEC_360_' and trashed=false`,
+      orderBy: 'createdTime desc', // Más recientes primero
+      pageSize: 10,
+      fields: 'files(id, name, createdTime, size)'
+    });
+    
+    const files = response.data.files || [];
+    console.log(`📋 [Resumable] Encontrados ${files.length} archivos recientes`);
+    
+    // Buscar archivo con nombre exacto o similar timestamp
+    const targetFile = files.find(file => {
+      // Extraer timestamp del nombre
+      const match = fileName.match(/AVITEC_360_([^_]+)_/);
+      if (match) {
+        const timestamp = match[1];
+        return file.name.includes(timestamp);
+      }
+      return file.name === fileName;
+    });
+    
+    if (targetFile) {
+      console.log(`✅ [Resumable] Archivo encontrado: ${targetFile.name} (${targetFile.id})`);
+      return targetFile.id;
+    } else {
+      console.log('❌ [Resumable] No se encontró el archivo');
+      return null;
+    }
+    
+  } catch (error) {
+    console.error('❌ [Resumable] Error buscando archivo:', error);
+    return null;
   }
 }
 
@@ -164,5 +237,6 @@ function generateUploadLinks(fileId, folderId, fileName, date) {
 module.exports = {
   createResumableUploadSession,
   checkUploadStatus,
+  findRecentUploadedFile,
   generateUploadLinks
 };

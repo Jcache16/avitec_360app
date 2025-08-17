@@ -247,26 +247,74 @@ export class ResumableUploadService {
    * Verificar subida y obtener enlaces del archivo
    */
   private async verifyAndGetLinks(sessionData: ResumableSessionData): Promise<UploadResult> {
-    const response = await fetch('/api/upload/verify-upload', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        uploadUrl: sessionData.uploadUrl,
-        fileName: sessionData.fileName,
-        folderId: sessionData.folderId,
-        date: sessionData.date
-      }),
-    });
+    console.log('🔍 [Resumable] Verificando subida completada...');
     
-    const data = await response.json();
-    
-    if (!response.ok || !data.success) {
-      throw new Error(data.error || 'Error verificando subida');
+    // Intentar verificación con reintentos
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const response = await fetch('/api/upload/verify-upload', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            uploadUrl: sessionData.uploadUrl,
+            fileName: sessionData.fileName,
+            folderId: sessionData.folderId,
+            date: sessionData.date
+          }),
+        });
+        
+        const data = await response.json();
+        
+        if (response.ok && data.success) {
+          console.log('✅ [Resumable] Verificación exitosa');
+          return data;
+        } else if (response.status >= 500) {
+          // Error del servidor - reintentar
+          console.warn(`⚠️ [Resumable] Error del servidor en intento ${attempt}/3:`, data.error);
+          
+          if (attempt === 3) {
+            // Último intento - devolver error pero indicar que el archivo podría estar subido
+            return {
+              success: false,
+              error: `Error de verificación: ${data.error}. El archivo podría haberse subido correctamente - verifique Google Drive.`
+            };
+          }
+          
+          // Esperar antes del siguiente intento
+          await this.sleep(2000 * attempt);
+          continue;
+        } else {
+          // Error del cliente o lógica - no reintentar
+          console.error('❌ [Resumable] Error en verificación:', data);
+          return {
+            success: false,
+            error: data.error || 'Error desconocido en verificación'
+          };
+        }
+        
+      } catch (error) {
+        console.warn(`⚠️ [Resumable] Error de red en verificación, intento ${attempt}/3:`, error);
+        
+        if (attempt === 3) {
+          // Último intento fallido
+          return {
+            success: false,
+            error: 'Error de red en verificación. El archivo probablemente se subió correctamente - verifique Google Drive.'
+          };
+        }
+        
+        // Esperar antes del siguiente intento
+        await this.sleep(2000 * attempt);
+      }
     }
     
-    return data;
+    // Este punto no debería alcanzarse
+    return {
+      success: false,
+      error: 'Error inesperado en verificación'
+    };
   }
 
   /**

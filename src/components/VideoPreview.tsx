@@ -287,7 +287,17 @@ export default function VideoPreview({
         
         alert(`¡Video subido exitosamente!\n\nCarpeta: ${date}\nArchivo: ${uploadedFileName}\n\n✅ Subida resumable directa`);
       } else {
-        throw new Error(result.error || 'Error desconocido en la subida');
+        // Error pero posiblemente subido
+        const errorMsg = result.error || 'Error desconocido en la subida';
+        console.warn('⚠️ Error en subida, pero archivo podría estar subido:', errorMsg);
+        
+        if (errorMsg.includes('verifique Google Drive') || errorMsg.includes('archivo podría haberse subido')) {
+          // El archivo probablemente se subió, solo falló la verificación
+          alert(`⚠️ Posible subida exitosa con error de verificación\n\n${errorMsg}\n\nPor favor verifique Google Drive para confirmar que el video se subió.`);
+          setUploadStep("Subida completada - verificar Drive");
+        } else {
+          throw new Error(errorMsg);
+        }
       }
       
     } catch (uploadError) {
