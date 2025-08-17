@@ -1,7 +1,12 @@
 /**
  * 🎬 AVITEC 360 BACKEND - PROCESAMIENTO DE VIDEOS
  * 
- * Versión 1.6.0 - Pipeline de 1 pasada optimizado (sin generación de overlays)
+ * Versión 1.6.1 - Pipeline optimizado con crop inteligente para iPhone
+ * 
+ * MEJORAS EN ESTA VERSIÓN:
+ * - Crop inteligente mejorado para videos iPhone 3:4 que elimina barras negras
+ * - Detección específica de aspectos 3:4, 4:3, 9:16 y 16:9
+ * - Escalado optimizado para llenar completamente el formato 9:16 vertical
  */
 
 // Cargar variables de entorno al inicio
@@ -197,7 +202,7 @@ class VideoProcessor {
       await fs.copy(videoPath, originalInput);
 
       // Detección rápida de rotación/aspecto para el pipeline de 1 pasada
-      let rotationInfo = { needsRotation: false, filter: '', needsCrop: false };
+      let rotationInfo = { needsRotation: false, filter: '', needsCrop: false, aspectRatio: null };
       try {
         rotationInfo = await this.getQuickRotationInfo(originalInput);
       } catch (e) {
@@ -254,9 +259,28 @@ class VideoProcessor {
     await fs.copy(overlaySourcePath, overlayPath);
 
     // Construir filtros de preproceso (rotación + escalado 720x1280 → pad o crop inteligente)
-    const baseScale = rotationInfo && rotationInfo.needsCrop
-      ? 'scale=960:1280:force_original_aspect_ratio=increase,crop=720:1280'
-      : 'scale=720:1280:force_original_aspect_ratio=decrease,pad=720:1280:(ow-iw)/2:(oh-ih)/2:color=black';
+    let baseScale;
+    if (rotationInfo && rotationInfo.needsCrop) {
+      const ratio = rotationInfo.aspectRatio || 1;
+      
+      if (Math.abs(ratio - (4/3)) < 0.1) {
+        // Para videos 4:3 horizontales: escalar y crop horizontal
+        baseScale = 'scale=960:1280:force_original_aspect_ratio=increase,crop=720:1280';
+        this.log(`⚡ 🔧 Pipeline 1-pasada: Crop 4:3 horizontal → 960x1280 → 720x1280`);
+      } else if (Math.abs(ratio - (3/4)) < 0.1) {
+        // Para videos 3:4 iPhone: escalar y crop centrado para llenar 9:16 sin barras negras
+        baseScale = 'scale=720:-1:force_original_aspect_ratio=increase,crop=720:1280:0:(ih-1280)/2';
+        this.log(`⚡ 🍎 Pipeline 1-pasada: Crop iPhone 3:4 → ancho 720px, crop centrado (sin barras negras)`);
+      } else {
+        // Fallback genérico para otros aspectos que necesiten crop
+        baseScale = 'scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280';
+        this.log(`⚡ ⚙️ Pipeline 1-pasada: Crop genérico → 720x1280`);
+      }
+    } else {
+      // Para otros formatos: padding tradicional
+      baseScale = 'scale=720:1280:force_original_aspect_ratio=decrease,pad=720:1280:(ow-iw)/2:(oh-ih)/2:color=black';
+      this.log(`⚡ 📐 Pipeline 1-pasada: Escalado con padding → 720x1280`);
+    }
     const rotate = rotationInfo && rotationInfo.needsRotation ? `${rotationInfo.filter},` : '';
 
     // Calcular duraciones saneadas
@@ -422,9 +446,22 @@ class VideoProcessor {
       // PASO 2: Aplicar filtro optimizado según detección (720p vertical)
       let scaleFilter;
       if (needsCrop) {
-        // Para videos 4:3: crop inteligente que llena el marco completo en 720p
-        scaleFilter = 'scale=960:1280:force_original_aspect_ratio=increase,crop=720:1280';
-        this.log(`📐 Usando crop inteligente para video 4:3 → escala a 960x1280 y corta a 720x1280 (720p)`);
+        const ratio = aspectRatio || 1;
+        
+        if (Math.abs(ratio - (4/3)) < 0.1) {
+          // Para videos 4:3 horizontales: escalar y crop horizontal
+          scaleFilter = 'scale=960:1280:force_original_aspect_ratio=increase,crop=720:1280';
+          this.log(`📐 🔧 Aplicando crop 4:3 horizontal → escala a 960x1280 y corta horizontalmente a 720x1280`);
+        } else if (Math.abs(ratio - (3/4)) < 0.1) {
+          // Para videos 3:4 iPhone: escalar más grande y crop centrado para llenar 9:16
+          // La idea es escalar hasta que el ancho llene 720px, luego crop vertical centrado
+          scaleFilter = 'scale=720:-1:force_original_aspect_ratio=increase,crop=720:1280:0:(ih-1280)/2';
+          this.log(`📐 🍎 Aplicando crop iPhone 3:4 → escala ancho a 720px, crop centrado vertical (elimina barras negras)`);
+        } else {
+          // Fallback genérico para otros aspectos que necesiten crop
+          scaleFilter = 'scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280';
+          this.log(`📐 ⚙️ Aplicando crop genérico → escala con increase y crop a 720x1280`);
+        }
       } else {
         // Para otros formatos: padding tradicional en 720p
         scaleFilter = 'scale=720:1280:force_original_aspect_ratio=decrease,pad=720:1280:(ow-iw)/2:(oh-ih)/2:color=black';
@@ -542,12 +579,18 @@ class VideoProcessor {
           const ratio = width / height;
           aspectRatio = ratio;
           
-          // Detectar videos 4:3 (ratio ≈ 1.33) que necesitan crop para 9:16 vertical en 720p
-          if (Math.abs(ratio - (4/3)) < 0.1) { // 4:3 con tolerancia
+          // Detectar videos que necesitan crop inteligente para llenar 9:16 sin barras negras
+          if (Math.abs(ratio - (4/3)) < 0.1) { // 4:3 horizontal con tolerancia
             needsCrop = true;
             this.log(`📐 Video 4:3 detectado (${width}x${height}, ratio: ${ratio.toFixed(2)}) - aplicando crop inteligente a 720p`);
-          } else if (Math.abs(ratio - (3/4)) < 0.1) { // 3:4 (ya vertical)
-            this.log(`📐 Video 3:4 detectado (${width}x${height}, ratio: ${ratio.toFixed(2)}) - ya es vertical, escalando a 720p`);
+          } else if (Math.abs(ratio - (3/4)) < 0.1) { // 3:4 vertical (iPhone típico)
+            // Los videos 3:4 de iPhone necesitan crop para llenar completamente 9:16
+            needsCrop = true;
+            this.log(`📐 Video 3:4 iPhone detectado (${width}x${height}, ratio: ${ratio.toFixed(2)}) - aplicando crop inteligente para llenar 9:16 sin barras negras`);
+          } else if (ratio > 0.55 && ratio < 0.58) { // 9:16 aproximado (0.5625)
+            this.log(`📐 Video 9:16 detectado (${width}x${height}, ratio: ${ratio.toFixed(2)}) - escalando directo a 720p`);
+          } else if (ratio > 1.76 && ratio < 1.79) { // 16:9 aproximado (1.7778)
+            this.log(`📐 Video 16:9 detectado (${width}x${height}, ratio: ${ratio.toFixed(2)}) - escalando con padding a 720p`);
           } else {
             this.log(`📐 Proporción detectada: ${width}x${height} (ratio: ${ratio.toFixed(2)}) - escalando a 720p`);
           }

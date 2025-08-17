@@ -3,6 +3,7 @@ const express = require('express');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const fsExtra = require('fs-extra');
 const { ensureDateFolder, uploadVideoToDrive, getFolderPublicLink } = require('../services/driveUtilsOAuth');
 
 const router = express.Router();
@@ -176,3 +177,145 @@ router.get('/test-oauth', async (req, res) => {
 });
 
 module.exports = router;
+
+/**
+ * Carga por CHUNKS para evitar límites de payload en plataformas serverless
+ * Cliente envía pequeños binarios a /video-oauth-chunk con headers de control.
+ */
+router.post('/video-oauth-chunk',
+  // Aceptar cuerpo binario crudo (hasta 10MB por chunk)
+  express.raw({ type: '*/*', limit: '10mb' }),
+  async (req, res) => {
+    console.log('\n🚀 [OAuth Upload CHUNK] Recibiendo chunk...');
+    try {
+      const headers = req.headers;
+      const uploadId = String(headers['x-upload-id'] || '').trim();
+      const chunkIndex = parseInt(String(headers['x-chunk-index'] || '0'));
+      const chunkTotal = parseInt(String(headers['x-chunk-total'] || '1'));
+      const fileName = String(headers['x-file-name'] || 'video.mp4');
+      const fileSize = parseInt(String(headers['x-file-size'] || '0'));
+      const mime = String(headers['x-file-mime'] || 'video/mp4');
+      const chunkSize = parseInt(String(headers['x-chunk-size'] || '0'));
+
+      if (!uploadId) {
+        return res.status(400).json({ success: false, error: 'Falta x-upload-id' });
+      }
+      if (!Number.isFinite(chunkIndex) || !Number.isFinite(chunkTotal) || chunkIndex < 0 || chunkTotal <= 0) {
+        return res.status(400).json({ success: false, error: 'Metadatos de chunk inválidos' });
+      }
+      if (!req.body || !(req.body instanceof Buffer)) {
+        return res.status(400).json({ success: false, error: 'Cuerpo del chunk inválido' });
+      }
+
+      const chunksDir = path.join(__dirname, '..', 'uploads', 'chunks', uploadId);
+      fsExtra.ensureDirSync(chunksDir);
+
+      const partPath = path.join(chunksDir, `part_${chunkIndex}`);
+
+      // Si el chunk ya existe con el mismo tamaño, asumir recibido (permite reintentos)
+      if (fs.existsSync(partPath)) {
+        try {
+          const st = fs.statSync(partPath);
+          if (!isNaN(chunkSize) && st.size === chunkSize) {
+            console.log(`ℹ️ [Chunk ${chunkIndex}] Ya existía, se omite reescritura`);
+          } else {
+            fs.writeFileSync(partPath, req.body);
+            console.log(`✏️ [Chunk ${chunkIndex}] Reescrito con tamaño distinto`);
+          }
+        } catch (e) {
+          fs.writeFileSync(partPath, req.body);
+        }
+      } else {
+        fs.writeFileSync(partPath, req.body);
+        console.log(`✅ [Chunk ${chunkIndex}] Guardado (${req.body.length} bytes)`);
+      }
+
+      // Comprobar si ya están todos los chunks
+      const files = fs.readdirSync(chunksDir).filter(f => f.startsWith('part_'));
+      const count = files.length;
+      console.log(`📊 [Chunks] ${count}/${chunkTotal} recibidos (uploadId=${uploadId})`);
+
+      if (count < chunkTotal) {
+        return res.json({ success: true, received: true, partial: true, uploadId, chunkIndex });
+      }
+
+      // Ensamblar en el orden correcto
+      const sortedParts = Array.from({ length: chunkTotal }, (_, i) => path.join(chunksDir, `part_${i}`));
+      for (const p of sortedParts) {
+        if (!fs.existsSync(p)) {
+          console.error('❌ Falta chunk esperado:', p);
+          return res.status(400).json({ success: false, error: 'Faltan chunks para ensamblar' });
+        }
+      }
+
+      const uploadsDir = path.join(__dirname, '..', 'uploads');
+      fsExtra.ensureDirSync(uploadsDir);
+
+      const safeName = fileName.replace(/[^a-zA-Z0-9.-]/g, '_');
+      const ext = path.extname(safeName) || '.mp4';
+      const assembledPath = path.join(uploadsDir, `${uploadId}${ext}`);
+
+      const writeStream = fs.createWriteStream(assembledPath);
+      for (let i = 0; i < chunkTotal; i++) {
+        const part = sortedParts[i];
+        const data = fs.readFileSync(part);
+        writeStream.write(data);
+      }
+      writeStream.end();
+
+      await new Promise((resolve, reject) => {
+        writeStream.on('finish', resolve);
+        writeStream.on('error', reject);
+      });
+
+      const assembledStats = fs.statSync(assembledPath);
+      console.log(`🧩 Ensamblado completo: ${(assembledStats.size / 1024 / 1024).toFixed(2)} MB (esperado ${(fileSize/1024/1024).toFixed(2)} MB)`);
+
+      // Subir a Drive
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const today = new Date().toISOString().split('T')[0];
+      const uniqueFileName = `AVITEC_360_${timestamp}_${safeName}`;
+
+      const dateFolderId = await ensureDateFolder(today);
+      const fileId = await uploadVideoToDrive(assembledPath, uniqueFileName, dateFolderId);
+
+      const folderLink = getFolderPublicLink(dateFolderId);
+      const fileViewLink = `https://drive.google.com/file/d/${fileId}/view`;
+      const fileDownloadLink = `https://drive.google.com/uc?export=download&id=${fileId}`;
+
+      // Limpieza: borrar ensamblado y partes
+      try {
+        fs.unlinkSync(assembledPath);
+      } catch {}
+      try {
+        fsExtra.removeSync(chunksDir);
+      } catch {}
+
+      return res.json({
+        success: true,
+        message: 'Video subido exitosamente usando OAuth (chunks)',
+        data: {
+          fileId,
+          fileName: uniqueFileName,
+          originalName: safeName,
+          size: assembledStats.size,
+          date: today,
+          folderId: dateFolderId,
+          links: {
+            folder: folderLink,
+            view: fileViewLink,
+            download: fileDownloadLink
+          },
+          qrCode: {
+            url: fileViewLink,
+            text: `Video AVITEC 360 - ${today}`
+          }
+        }
+      });
+
+    } catch (error) {
+      console.error('❌ [OAuth Upload CHUNK] Error:', error);
+      return res.status(500).json({ success: false, error: error.message || 'Error procesando chunk' });
+    }
+  }
+);

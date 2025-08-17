@@ -230,6 +230,7 @@ export default function VideoPreview({
     }
   };
 
+  // Subida en CHUNKS para evitar errores de "archivo demasiado grande"
   const uploadToGoogleDrive = async () => {
     console.log('🌐 Iniciando subida a Google Drive (OAuth)...');
     setIsUploading(true);
@@ -249,81 +250,90 @@ export default function VideoPreview({
         type: videoBlob.type,
         sizeMB: (videoBlob.size / (1024 * 1024)).toFixed(2)
       });
-      
-      // Paso 2: Crear FormData para enviar al backend OAuth
-      const formData = new FormData();
       const fileName = `avitec-360-${Date.now()}.mp4`;
-      formData.append('video', videoBlob, fileName);
-      
-      // Paso 3: Llamar al endpoint OAuth del backend
-      console.log('📤 Subiendo a Drive via OAuth...');
-      const uploadResponse = await fetch('/api/upload/video-oauth', {
-        method: 'POST',
-        body: formData
-      });
-      
-      if (!uploadResponse.ok) {
-        let errorMessage = `Error HTTP ${uploadResponse.status}: ${uploadResponse.statusText}`;
-        
-        try {
-          // Verificar si la respuesta es JSON antes de parsearla
-          const contentType = uploadResponse.headers.get('content-type');
-          if (contentType && contentType.includes('application/json')) {
-            const errorData = await uploadResponse.json();
-            errorMessage = errorData.error || errorData.message || errorMessage;
-          } else {
-            // Si no es JSON, leer como texto para debugging
-            const errorText = await uploadResponse.text();
-            console.error('❌ Respuesta no-JSON del servidor:', errorText.substring(0, 200));
-            errorMessage = `Servidor devolvió respuesta inválida (${uploadResponse.status})`;
-          }
-        } catch (parseError) {
-          console.error('❌ Error parseando respuesta del servidor:', parseError);
-          errorMessage = `Error de comunicación con el servidor (${uploadResponse.status})`;
-        }
-        
-        // Manejar errores específicos de OAuth
-        if (uploadResponse.status === 401) {
-          throw new Error('Token OAuth expirado. Contacte al administrador para renovar la autorización.');
-        } else if (uploadResponse.status === 507) {
-          throw new Error('Cuota de almacenamiento de Google Drive excedida. Libere espacio en su Drive personal.');
-        } else if (uploadResponse.status === 404) {
-          throw new Error('Endpoint de subida no encontrado. Verifique que el backend esté funcionando.');
-        } else if (uploadResponse.status >= 500) {
-          throw new Error('Error interno del servidor. Intente de nuevo en unos momentos.');
-        } else {
-          throw new Error(errorMessage);
-        }
-      }
-      
-      // Verificar que la respuesta exitosa también sea JSON válido
-      let uploadResult;
-      try {
-        const contentType = uploadResponse.headers.get('content-type');
-        if (!contentType || !contentType.includes('application/json')) {
-          throw new Error('Servidor devolvió respuesta no-JSON para operación exitosa');
-        }
-        uploadResult = await uploadResponse.json();
-      } catch (parseError) {
-        console.error('❌ Error parseando respuesta exitosa:', parseError);
-        throw new Error('Error procesando respuesta del servidor');
-      }
-      
-      console.log('✅ Subida OAuth exitosa:', uploadResult);
-      
-      if (uploadResult.success && uploadResult.data) {
-        setDriveUploadData({
-          folderLink: uploadResult.data.links.folder,
-          fileLink: uploadResult.data.links.view,
-          fileName: uploadResult.data.fileName,
-          date: uploadResult.data.date
+
+      // Preferir subida en chunks; si falla, intentar single-shot como fallback
+      const chunkSize = 2 * 1024 * 1024; // 2MB
+      const totalChunks = Math.ceil(videoBlob.size / chunkSize);
+      const uploadId = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+
+      console.log(`📤 Subiendo en chunks: ${totalChunks} partes de ~${(chunkSize/1024/1024).toFixed(0)}MB`);
+
+      const sendChunk = async (index: number): Promise<Response> => {
+        const start = index * chunkSize;
+        const end = Math.min(start + chunkSize, videoBlob.size);
+        const chunk = videoBlob.slice(start, end);
+        const headers: Record<string, string> = {
+          'Content-Type': 'application/octet-stream',
+          'x-upload-id': uploadId,
+          'x-chunk-index': String(index),
+          'x-chunk-total': String(totalChunks),
+          'x-chunk-size': String(end - start),
+          'x-file-name': fileName,
+          'x-file-size': String(videoBlob.size),
+          'x-file-mime': videoBlob.type || 'video/mp4',
+        };
+        return fetch('/api/upload/video-oauth/chunk', {
+          method: 'POST',
+          headers,
+          body: chunk,
         });
-        setQrLink(uploadResult.data.links.view); // QR apunta directamente al video
-        
-        // Mostrar mensaje de éxito mejorado
-        alert(`¡Video subido exitosamente con OAuth!\n\nCarpeta: ${uploadResult.data.date}\nArchivo: ${uploadResult.data.fileName}\n\n✅ Usando cuota personal de Google Drive`);
+      };
+
+      // Enviar con reintentos por chunk
+      let finalResult: any = null;
+      for (let i = 0; i < totalChunks; i++) {
+        let attempt = 0;
+        let ok = false;
+        while (attempt < 3 && !ok) {
+          attempt++;
+          try {
+            const resp = await sendChunk(i);
+            if (!resp.ok) {
+              const text = await resp.text();
+              throw new Error(`Chunk ${i} HTTP ${resp.status}: ${text.substring(0, 120)}`);
+            }
+            const ct = resp.headers.get('content-type') || '';
+            const data = ct.includes('application/json') ? await resp.json() : { success: true };
+            // Último chunk debería retornar objeto final
+            if (i === totalChunks - 1) {
+              finalResult = data;
+            }
+            ok = true;
+          } catch (e) {
+            console.warn(`⚠️ Falla enviando chunk ${i}, intento ${attempt}/3`, e);
+            if (attempt >= 3) throw e;
+            await new Promise(r => setTimeout(r, 800 * attempt));
+          }
+        }
+      }
+
+      if (!finalResult || !finalResult.success) {
+        // Fallback: intentar la subida tradicional si algo falló silenciosamente
+        console.log('↩️ Fallback a subida tradicional');
+        const formData = new FormData();
+        formData.append('video', videoBlob, fileName);
+        const uploadResponse = await fetch('/api/upload/video-oauth', { method: 'POST', body: formData });
+        if (!uploadResponse.ok) {
+          const text = await uploadResponse.text();
+          throw new Error(`Fallback HTTP ${uploadResponse.status}: ${text.substring(0, 200)}`);
+        }
+        finalResult = await uploadResponse.json();
+      }
+
+      console.log('✅ Subida OAuth exitosa (chunks):', finalResult);
+
+      if (finalResult.success && finalResult.data) {
+        setDriveUploadData({
+          folderLink: finalResult.data.links.folder,
+          fileLink: finalResult.data.links.view,
+          fileName: finalResult.data.fileName,
+          date: finalResult.data.date
+        });
+        setQrLink(finalResult.data.links.view);
+        alert(`¡Video subido exitosamente con OAuth!\n\nCarpeta: ${finalResult.data.date}\nArchivo: ${finalResult.data.fileName}\n\n✅ Carga en chunks`);
       } else {
-        throw new Error('Respuesta inesperada del servidor OAuth');
+        throw new Error('Respuesta inesperada del servidor OAuth (chunks)');
       }
       
     } catch (uploadError) {
