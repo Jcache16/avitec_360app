@@ -5,6 +5,11 @@ const path = require('path');
 const fs = require('fs');
 const fsExtra = require('fs-extra');
 const { ensureDateFolder, uploadVideoToDrive, getFolderPublicLink } = require('../services/driveUtilsOAuth');
+const { 
+  createResumableUploadSession, 
+  checkUploadStatus, 
+  generateUploadLinks 
+} = require('../services/driveResumableUpload');
 
 const router = express.Router();
 
@@ -172,6 +177,128 @@ router.get('/test-oauth', async (req, res) => {
       success: false,
       error: 'Error al probar conexión OAuth',
       details: error.message
+    });
+  }
+});
+
+/**
+ * NUEVO: Crear sesión de subida resumable directa a Google Drive
+ * El cliente usará la URL devuelta para subir directamente a Drive
+ */
+router.post('/create-resumable-session', async (req, res) => {
+  console.log('\n🚀 [Resumable Session] Creando sesión de subida...');
+  
+  try {
+    const { fileName, fileSize, mimeType } = req.body;
+    
+    // Validaciones
+    if (!fileName || !fileSize) {
+      return res.status(400).json({
+        success: false,
+        error: 'fileName y fileSize son requeridos'
+      });
+    }
+    
+    if (fileSize > 500 * 1024 * 1024) { // 500MB límite
+      return res.status(413).json({
+        success: false,
+        error: 'Archivo demasiado grande (máximo 500MB)'
+      });
+    }
+    
+    console.log(`📄 Solicitando sesión para: ${fileName} (${(fileSize/1024/1024).toFixed(2)} MB)`);
+    
+    const sessionData = await createResumableUploadSession(
+      fileName, 
+      fileSize, 
+      mimeType || 'video/mp4'
+    );
+    
+    console.log('✅ Sesión creada exitosamente');
+    
+    res.json({
+      success: true,
+      message: 'Sesión de subida resumable creada',
+      data: sessionData
+    });
+    
+  } catch (error) {
+    console.error('❌ [Resumable Session] Error:', error);
+    
+    let errorMessage = 'Error interno del servidor';
+    let statusCode = 500;
+    
+    if (error.message.includes('quotaExceeded')) {
+      errorMessage = 'Cuota de almacenamiento de Google Drive excedida';
+      statusCode = 507;
+    } else if (error.message.includes('authError') || error.message.includes('invalid_grant')) {
+      errorMessage = 'Token OAuth expirado. Contacte al administrador';
+      statusCode = 401;
+    }
+    
+    res.status(statusCode).json({
+      success: false,
+      error: errorMessage,
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+/**
+ * NUEVO: Verificar estado de subida resumable y generar enlaces
+ */
+router.post('/verify-upload', async (req, res) => {
+  console.log('\n🔍 [Verify Upload] Verificando estado de subida...');
+  
+  try {
+    const { uploadUrl, fileName, folderId, date } = req.body;
+    
+    if (!uploadUrl) {
+      return res.status(400).json({
+        success: false,
+        error: 'uploadUrl es requerido'
+      });
+    }
+    
+    console.log('🔍 Verificando URL:', uploadUrl.substring(0, 100) + '...');
+    
+    const status = await checkUploadStatus(uploadUrl);
+    
+    if (status.status === 'completed') {
+      console.log('✅ Subida completada, generando enlaces...');
+      
+      const links = generateUploadLinks(
+        status.fileId,
+        folderId,
+        fileName,
+        date
+      );
+      
+      console.log('🔗 Enlaces generados exitosamente');
+      
+      res.json({
+        success: true,
+        message: 'Subida completada exitosamente',
+        data: links
+      });
+    } else {
+      console.log(`📊 Subida incompleta: ${status.uploadedBytes || 0} bytes`);
+      
+      res.json({
+        success: false,
+        incomplete: true,
+        uploadedBytes: status.uploadedBytes || 0,
+        message: 'Subida aún en progreso'
+      });
+    }
+    
+  } catch (error) {
+    console.error('❌ [Verify Upload] Error:', error);
+    
+    res.status(500).json({
+      success: false,
+      error: 'Error verificando estado de subida',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 });

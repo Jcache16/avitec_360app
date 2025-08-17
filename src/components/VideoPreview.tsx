@@ -10,6 +10,7 @@
 import { useState, useEffect, useRef } from "react";
 import { StyleConfig, ProcessingProgress } from "@/utils/VideoProcessor";
 import { processVideoHybrid } from "@/utils/BackendService";
+import { resumableUploadService } from "@/utils/ResumableUploadService";
 import { QRCodeSVG } from 'qrcode.react';
 
 interface VideoPreviewProps {
@@ -37,6 +38,8 @@ export default function VideoPreview({
   const [processingStep, setProcessingStep] = useState("Iniciando...");
   const [error, setError] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadStep, setUploadStep] = useState("");
   const [qrLink, setQrLink] = useState<string>("");
   const [driveUploadData, setDriveUploadData] = useState<{
     folderLink: string;
@@ -230,15 +233,18 @@ export default function VideoPreview({
     }
   };
 
-  // Subida en CHUNKS para evitar errores de "archivo demasiado grande"
+  // Nueva implementación de subida resumable directa a Google Drive
   const uploadToGoogleDrive = async () => {
-    console.log('🌐 Iniciando subida a Google Drive (OAuth)...');
+    console.log('🌐 Iniciando subida resumable directa a Google Drive...');
     setIsUploading(true);
+    setUploadProgress(0);
+    setUploadStep("Preparando subida...");
     setQrLink("");
     setDriveUploadData(null);
 
     try {
       // Paso 1: Obtener el blob del video procesado
+      setUploadStep("Obteniendo video procesado...");
       const response = await fetch(videoUrl);
       if (!response.ok) {
         throw new Error('Error obteniendo el video procesado');
@@ -250,124 +256,61 @@ export default function VideoPreview({
         type: videoBlob.type,
         sizeMB: (videoBlob.size / (1024 * 1024)).toFixed(2)
       });
+      
       const fileName = `avitec-360-${Date.now()}.mp4`;
-
-      // Preferir subida en chunks; si falla, intentar single-shot como fallback
-      const chunkSize = 2 * 1024 * 1024; // 2MB
-      const totalChunks = Math.ceil(videoBlob.size / chunkSize);
-      const uploadId = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-
-      console.log(`📤 Subiendo en chunks: ${totalChunks} partes de ~${(chunkSize/1024/1024).toFixed(0)}MB`);
-
-      const sendChunk = async (index: number): Promise<Response> => {
-        const start = index * chunkSize;
-        const end = Math.min(start + chunkSize, videoBlob.size);
-        const chunk = videoBlob.slice(start, end);
-        const headers: Record<string, string> = {
-          'Content-Type': 'application/octet-stream',
-          'x-upload-id': uploadId,
-          'x-chunk-index': String(index),
-          'x-chunk-total': String(totalChunks),
-          'x-chunk-size': String(end - start),
-          'x-file-name': fileName,
-          'x-file-size': String(videoBlob.size),
-          'x-file-mime': videoBlob.type || 'video/mp4',
-        };
-        return fetch('/api/upload/video-oauth/chunk', {
-          method: 'POST',
-          headers,
-          body: chunk,
-        });
-      };
-
-      // Enviar con reintentos por chunk
-      type UploadResult = {
-        success: boolean;
-        data?: {
-          links: { folder: string; view: string; download: string };
-          fileName: string;
-          date: string;
-        };
-      };
-      let finalResult: UploadResult | null = null;
-      for (let i = 0; i < totalChunks; i++) {
-        let attempt = 0;
-        let ok = false;
-        while (attempt < 3 && !ok) {
-          attempt++;
-          try {
-            const resp = await sendChunk(i);
-            if (!resp.ok) {
-              const text = await resp.text();
-              throw new Error(`Chunk ${i} HTTP ${resp.status}: ${text.substring(0, 120)}`);
-            }
-            const ct = resp.headers.get('content-type') || '';
-            const data: UploadResult = ct.includes('application/json') ? await resp.json() : { success: true };
-            // Último chunk debería retornar objeto final
-            if (i === totalChunks - 1) {
-              finalResult = data;
-            }
-            ok = true;
-          } catch (e) {
-            console.warn(`⚠️ Falla enviando chunk ${i}, intento ${attempt}/3`, e);
-            if (attempt >= 3) throw e;
-            await new Promise(r => setTimeout(r, 800 * attempt));
-          }
+      
+      // Paso 2: Subir usando el servicio de subidas resumables
+      setUploadStep("Creando sesión de subida...");
+      
+      const result = await resumableUploadService.uploadFile(
+        videoBlob,
+        fileName,
+        (progress) => {
+          setUploadProgress(progress.percentage);
+          setUploadStep(`Subiendo directamente a Drive... ${progress.percentage}%`);
+          console.log(`📊 Progreso: ${progress.percentage}% (${(progress.uploadedBytes / 1024 / 1024).toFixed(2)} MB)`);
         }
-      }
-
-      if (!finalResult || !finalResult.success) {
-        // Fallback: intentar la subida tradicional si algo falló silenciosamente
-        console.log('↩️ Fallback a subida tradicional');
-        const formData = new FormData();
-        formData.append('video', videoBlob, fileName);
-        const uploadResponse = await fetch('/api/upload/video-oauth', { method: 'POST', body: formData });
-        if (!uploadResponse.ok) {
-          const text = await uploadResponse.text();
-          throw new Error(`Fallback HTTP ${uploadResponse.status}: ${text.substring(0, 200)}`);
-        }
-        finalResult = await uploadResponse.json();
-      }
-
-      console.log('✅ Subida OAuth exitosa (chunks):', finalResult);
-
-      if (finalResult && finalResult.success && finalResult.data) {
-        const { links, fileName: upFileName, date } = finalResult.data;
+      );
+      
+      if (result.success && result.data) {
+        console.log('✅ Subida resumable exitosa:', result);
+        
+        const { links, fileName: uploadedFileName, date } = result.data;
         setDriveUploadData({
           folderLink: links.folder,
           fileLink: links.view,
-          fileName: upFileName,
+          fileName: uploadedFileName,
           date
         });
         setQrLink(links.view);
-        alert(`¡Video subido exitosamente con OAuth!\n\nCarpeta: ${date}\nArchivo: ${upFileName}\n\n✅ Carga en chunks`);
+        setUploadStep("¡Subida completada!");
+        
+        alert(`¡Video subido exitosamente!\n\nCarpeta: ${date}\nArchivo: ${uploadedFileName}\n\n✅ Subida resumable directa`);
       } else {
-        throw new Error('Respuesta inesperada del servidor OAuth (chunks)');
+        throw new Error(result.error || 'Error desconocido en la subida');
       }
       
     } catch (uploadError) {
       console.error('❌ Error subiendo a Google Drive:', uploadError);
+      setUploadStep("Error en la subida");
       
-      let errorMessage = 'Error subiendo a Google Drive';
+      let errorMessage = 'Error subiendo el video';
       if (uploadError instanceof Error) {
-        errorMessage = uploadError.message;
+        if (uploadError.message.includes('quotaExceeded') || uploadError.message.includes('quota')) {
+          errorMessage = 'Cuota de almacenamiento de Google Drive excedida';
+        } else if (uploadError.message.includes('unauthorized') || uploadError.message.includes('OAuth')) {
+          errorMessage = 'Token de autorización expirado. Contacte al administrador';
+        } else if (uploadError.message.includes('network') || uploadError.message.includes('fetch')) {
+          errorMessage = 'Error de conexión. Verifique su internet e intente nuevamente';
+        } else {
+          errorMessage = uploadError.message;
+        }
       }
       
-      // Mostrar diferentes mensajes según el tipo de error
-      if (errorMessage.includes('Token OAuth expirado')) {
-        alert('❌ Token OAuth expirado: Contacte al administrador para renovar la autorización de Google Drive.');
-      } else if (errorMessage.includes('cuota') || errorMessage.includes('quota')) {
-        alert('❌ Cuota excedida: El almacenamiento personal de Google Drive está lleno. Libere espacio e intente de nuevo.');
-      } else if (errorMessage.includes('permisos') || errorMessage.includes('forbidden')) {
-        alert('❌ Error de permisos: No hay permisos suficientes en Google Drive.');
-      } else if (errorMessage.includes('demasiado grande') || (uploadError instanceof Error && uploadError.message.includes('413'))) {
-        alert('❌ Video demasiado grande: Los videos en móviles suelen ser más pesados. Intenta grabar un video más corto o usar un navegador de escritorio.');
-      } else {
-        alert(`❌ Error OAuth: ${errorMessage}\n\nIntenta de nuevo en unos momentos.`);
-      }
-      
+      alert(`Error subiendo video: ${errorMessage}`);
     } finally {
       setIsUploading(false);
+      setUploadProgress(0);
     }
   };
 
@@ -605,12 +548,25 @@ export default function VideoPreview({
             {isUploading ? (
               <>
                 <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                <span>Subiendo a Google Drive...</span>
+                <div className="flex flex-col items-center gap-1">
+                  <span>Subiendo a Google Drive...</span>
+                  {uploadProgress > 0 && (
+                    <div className="w-full max-w-48 bg-white/20 rounded-full h-2">
+                      <div 
+                        className="bg-white h-2 rounded-full transition-all duration-300"
+                        style={{ width: `${uploadProgress}%` }}
+                      ></div>
+                    </div>
+                  )}
+                  {uploadStep && (
+                    <span className="text-xs text-white/80">{uploadStep}</span>
+                  )}
+                </div>
               </>
             ) : (
               <>
                 <span className="text-xl">☁️</span>
-                <span>Subir a Google Drive</span>
+                <span>Subir a Google Drive (Resumable)</span>
               </>
             )}
           </button>
